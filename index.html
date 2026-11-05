@@ -1,0 +1,152 @@
+<!doctype html><html><head><meta charset=utf8><meta name=viewport content="width=device-width,initial-scale=1,viewport-fit=cover"><style>:root{color-scheme:light;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}html{scroll-padding-top:env(safe-area-inset-top,0px)}body{margin:0;padding:0;font:14px -apple-system,BlinkMacSystemFont,sans-serif;background:#fff;color:#000}img{max-width:100%}[hidden]:not([hidden=until-found i]){display:none!important}</style></head><body>
+<meta name="claude:viewport-fit-sides" content="cover">
+<title>Mesa de Suporte</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Plus+Jakarta+Sans:wght@500;600;700;800&display=swap" rel="stylesheet">
+ <link rel="stylesheet" href="index.css">
+ 
+<div class="wrap">
+  <header class="top">
+    <div class="top-inner">
+      <div class="brand"><h1>Mesa<span class="dot">·</span>Suporte</h1></div>
+      <nav class="tabs" id="tabs">
+        <a href="#tarefas" data-tab="tarefas">Tarefas</a>
+        <a href="#chamados" data-tab="chamados">Chamados</a>
+        <a href="#implantacoes" data-tab="implantacoes">Implantações</a>
+      </nav>
+    </div>
+  </header>
+
+  <div class="summary" id="summary"></div>
+
+  <section class="view" id="view-tarefas">
+    <h2>Tarefas fixas de hoje</h2>
+    <div class="fixed-list" id="fixedList"></div>
+    <div class="add-row">
+      <input type="text" id="fixedTitle" placeholder="Nova tarefa fixa (ex.: conferir fila de e-mails)">
+      <select id="fixedCat">
+        <option value="outro">Outro</option>
+        <option value="chamado">Chamado</option>
+        <option value="usuario">Usuário</option>
+        <option value="email">E-mail</option>
+        <option value="falha">Falha</option>
+      </select>
+      <button class="btn" id="addFixedBtn">Adicionar fixa</button>
+    </div>
+
+    <h2 style="margin-top:28px">Tarefas avulsas</h2>
+    <div class="add-row">
+      <input type="text" id="taskTitle" placeholder="Nova tarefa (ex.: abrir chamado para o cliente X)">
+      <select id="taskCat">
+        <option value="chamado">Chamado</option>
+        <option value="usuario">Criação de usuário</option>
+        <option value="email">E-mail</option>
+        <option value="falha">Falha</option>
+        <option value="outro">Outro</option>
+      </select>
+      <input type="date" id="taskDue">
+      <select id="taskPri">
+        <option value="media">Prioridade média</option>
+        <option value="alta">Prioridade alta</option>
+        <option value="baixa">Prioridade baixa</option>
+      </select>
+      <button class="btn" id="addTaskBtn">Adicionar</button>
+    </div>
+    <div id="taskGroups" style="margin-top:14px"></div>
+  </section>
+
+  <section class="view" id="view-chamados" hidden>
+    <div class="board-head">
+      <h2 style="margin:0">Chamados</h2>
+      <button class="btn" id="newTicketBtn" style="margin-left:auto">+ Novo chamado</button>
+    </div>
+    <div class="falha-card" id="falhaCard"></div>
+    <div class="lanes" id="lanes"></div>
+  </section>
+
+  <section class="view" id="view-implantacoes" hidden>
+    <div class="board-head">
+      <h2 style="margin:0">Empresas em implantação</h2>
+    </div>
+    <div class="add-row">
+      <input type="text" id="implEmpresa" placeholder="Nome da empresa em implantação">
+      <input type="text" id="implCodigo" placeholder="Código" style="width:110px">
+      <input type="date" id="implInicio">
+      <button class="btn" id="addImplBtn">Adicionar empresa</button>
+    </div>
+    <div class="impl-grid" id="implGrid" style="margin-top:14px"></div>
+  </section>
+
+  <footer class="hint" id="hint">Carregando seus dados…</footer>
+</div>
+
+<div class="overlay" id="ticketOverlay" hidden>
+  <div class="panel">
+    <h3 id="ticketPanelTitle">Novo chamado</h3>
+    <label>Cliente
+      <input type="text" id="t_client" placeholder="Nome do cliente ou empresa">
+    </label>
+    <label>Assunto
+      <input type="text" id="t_subject" placeholder="Ex.: Erro ao emitir nota fiscal">
+    </label>
+    <div class="row2">
+      <label>Tipo de chamado
+        <select id="t_tipo">
+          <option value="falha">Falha</option>
+          <option value="duvida">Dúvida</option>
+          <option value="solicitacao">Solicitação</option>
+          <option value="melhoria">Melhoria</option>
+        </select>
+      </label>
+      <label>Módulo
+        <select id="t_modulo"></select>
+      </label>
+    </div>
+    <div class="row2">
+      <label>Atribuído a
+        <select id="t_assignee">
+          <option value="">Sem responsável</option>
+          <option value="ADRIANO">Adriano</option>
+          <option value="ALISSON OLIVEIRA">Alisson Oliveira</option>
+          <option value="LUCAS">Lucas</option>
+          <option value="GABRIEL">Gabriel</option>
+          <option value="GUILHERME">Guilherme</option>
+        </select>
+      </label>
+      <label>Status
+        <select id="t_status">
+          <option value="aberto">Aberto</option>
+          <option value="pendente">Pendente</option>
+          <option value="em_processo">Em processo</option>
+          <option value="fechado">Fechado</option>
+        </select>
+      </label>
+    </div>
+    <div class="row2">
+      <label>Abertura
+        <input type="date" id="t_opened">
+      </label>
+      <label>Previsão de fechamento
+        <input type="date" id="t_expected">
+      </label>
+    </div>
+    <div class="row2">
+      <label>Próxima cobrança
+        <input type="date" id="t_followup">
+      </label>
+    </div>
+    <label>O que está acontecendo / por que não foi retornado
+      <textarea id="t_notes" placeholder="Ex.: aguardando retorno do fornecedor sobre a licença"></textarea>
+    </label>
+    <div class="panel-actions">
+      <button class="btn ghost" id="ticketCancelBtn">Cancelar</button>
+      <button class="btn" id="ticketSaveBtn">Salvar chamado</button>
+    </div>
+  </div>
+</div>
+
+</body>
+
+<script src="index.js" defer></script>
+</html>
