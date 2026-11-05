@@ -90,6 +90,7 @@
 
   function renderSummary(){
     var el = document.getElementById('summary');
+    if(!el) return;
     var today = todayStr();
     var tasks = state.tasks || [];
     var tickets = state.tickets || [];
@@ -112,6 +113,7 @@
 
   function renderFixed(){
     var list = document.getElementById('fixedList');
+    if(!list) return;
     var items = state.fixed;
     if(items === null){
       list.innerHTML = '<div class="empty">Carregando…</div>';
@@ -124,9 +126,20 @@
     var today = todayStr();
     list.innerHTML = items.map(function(it){
       var done = it.lastDone === today;
+      var empStr = (it.empresa ? esc(it.empresa) : '') + (it.codigo ? ' (' + esc(it.codigo) + ')' : '');
+      var dueHtml = it.dueDate ? '<span class="due" style="font-weight:600">Entrega: ' + fmtDate(it.dueDate) + '</span>' : '';
+      var doneHtml = (done && it.lastDone) ? '<span class="tag tipo-melhoria">Concluído em ' + fmtDate(it.lastDone) + '</span>' : '';
+
       return '<div class="fixed-item'+(done?' done':'')+'" data-id="'+it.id+'">'+
         '<button class="check'+(done?' on':'')+'" data-act="toggleFixed" data-id="'+it.id+'" aria-label="Concluir">'+(done?checkSvg():'')+'</button>'+
-        '<span class="title">'+esc(it.title)+'</span>'+
+        '<div style="flex:1;min-width:0;display:flex;flex-direction:column;gap:4px">'+
+          '<span class="title">'+esc(it.title)+'</span>'+
+          '<div style="display:flex;gap:8px;align-items:center;font-size:12px;color:var(--fg-muted);flex-wrap:wrap">'+
+            (empStr ? '<span class="tag modulo">'+empStr+'</span>' : '')+
+            dueHtml+
+            doneHtml+
+          '</div>'+
+        '</div>'+
         '<span class="tag '+CAT_CLASS[it.category]+'">'+CAT_LABEL[it.category]+'</span>'+
         '<button class="icon-btn" data-act="delFixed" data-id="'+it.id+'" title="Remover">'+trashSvg()+'</button>'+
       '</div>';
@@ -137,12 +150,21 @@
     var late = !t.done && t.dueDate && t.dueDate < today;
     var isToday = !t.done && t.dueDate === today;
     var cls = 'task-card pri-'+t.priority + (late?' late':'') + (isToday?' today':'');
-    var dueHtml = t.dueDate ? '<span class="due'+(late?' late':'')+'">'+fmtDate(t.dueDate)+'</span>' : '<span>sem prazo</span>';
+    var dueHtml = t.dueDate ? '<span class="due'+(late?' late':'')+'">Entrega: '+fmtDate(t.dueDate)+'</span>' : '<span>sem prazo</span>';
+    var empStr = (t.empresa ? esc(t.empresa) : '') + (t.codigo ? ' (' + esc(t.codigo) + ')' : '');
+    var completedHtml = (t.done && t.completedAt) ? '<span class="tag tipo-melhoria">Concluído em ' + fmtDate(t.completedAt) + '</span>' : '';
+
     return '<div class="'+cls+'" data-id="'+t.id+'">'+
       '<button class="check'+(t.done?' on':'')+'" data-act="toggleTask" data-id="'+t.id+'" aria-label="Concluir">'+(t.done?checkSvg():'')+'</button>'+
       '<div class="body">'+
         '<div class="title">'+esc(t.title)+'</div>'+
-        '<div class="meta"><span class="pri-dot"></span>'+dueHtml+'<span class="tag '+CAT_CLASS[t.category]+'">'+CAT_LABEL[t.category]+'</span></div>'+
+        '<div class="meta">'+
+          '<span class="pri-dot"></span>'+
+          dueHtml+
+          (empStr ? '<span class="tag modulo">'+empStr+'</span>' : '')+
+          '<span class="tag '+CAT_CLASS[t.category]+'">'+CAT_LABEL[t.category]+'</span>'+
+          completedHtml+
+        '</div>'+
       '</div>'+
       '<div class="actions"><button class="icon-btn" data-act="delTask" data-id="'+t.id+'" title="Remover">'+trashSvg()+'</button></div>'+
     '</div>';
@@ -150,6 +172,7 @@
 
   function renderTasks(){
     var el = document.getElementById('taskGroups');
+    if(!el) return;
     var tasks = state.tasks;
     if(tasks === null){ el.innerHTML = '<div class="empty">Carregando…</div>'; return; }
     if(tasks.length === 0){
@@ -217,6 +240,7 @@
 
   function renderFalhaCard(){
     var el = document.getElementById('falhaCard');
+    if(!el) return;
     var tickets = state.tickets;
     if(tickets === null){ el.hidden = true; return; }
     var abertas = tickets.filter(function(t){ return t.tipo === 'falha' && t.status !== 'fechado'; }).length;
@@ -227,6 +251,7 @@
 
   function renderLanes(){
     var el = document.getElementById('lanes');
+    if(!el) return;
     var tickets = state.tickets;
     renderFalhaCard();
     if(tickets === null){ el.innerHTML = '<div class="empty">Carregando…</div>'; return; }
@@ -283,6 +308,7 @@
 
   function renderImplantacoes(){
     var el = document.getElementById('implGrid');
+    if(!el) return;
     var impls = state.implantacoes;
     if(impls === null){ el.innerHTML = '<div class="empty">Carregando…</div>'; return; }
     if(impls.length === 0){
@@ -302,10 +328,11 @@
     renderTasks();
     renderLanes();
     renderImplantacoes();
-    var loaded = state.fixed !== null && state.tasks !== null && state.tickets !== null && state.implantacoes !== null;
-    document.getElementById('hint').textContent = loaded
-      ? 'Seus dados ficam salvos automaticamente neste sistema.'
-      : 'Carregando seus dados…';
+    var hintEl = document.getElementById('hint');
+    if(hintEl){
+      var loaded = state.fixed !== null && state.tasks !== null && state.tickets !== null && state.implantacoes !== null;
+      hintEl.textContent = loaded ? 'Seus dados ficam salvos automaticamente neste sistema.' : 'Carregando seus dados…';
+    }
   }
 
   var TAB_NAMES = ['tarefas','chamados','implantacoes'];
@@ -313,7 +340,8 @@
     var h = (location.hash || '#tarefas').slice(1);
     if(TAB_NAMES.indexOf(h) === -1) h = 'tarefas';
     TAB_NAMES.forEach(function(name){
-      document.getElementById('view-'+name).hidden = (h !== name);
+      var v = document.getElementById('view-'+name);
+      if(v) v.hidden = (h !== name);
     });
     document.querySelectorAll('#tabs a').forEach(function(a){
       a.classList.toggle('active', a.dataset.tab === h);
@@ -322,20 +350,57 @@
   window.addEventListener('hashchange', applyTab);
 
   function addFixed(){
-    var title = document.getElementById('fixedTitle').value.trim();
+    var el = document.getElementById('fixedTitle');
+    if(!el) return;
+    var title = el.value.trim();
     if(!title) return;
     var cat = document.getElementById('fixedCat').value;
-    getStorage().collection('tasks_fixed').doc(uid()).set({ title:title, category:cat, lastDone:null, createdAt: Date.now() });
-    document.getElementById('fixedTitle').value = '';
+    var empresa = (document.getElementById('fixedEmpresa') ? document.getElementById('fixedEmpresa').value.trim() : "") || null;
+    var codigo = (document.getElementById('fixedCodigo') ? document.getElementById('fixedCodigo').value.trim() : "") || null;
+    var due = (document.getElementById('fixedDue') ? document.getElementById('fixedDue').value : "") || null;
+
+    getStorage().collection('tasks_fixed').doc(uid()).set({
+      title: title,
+      category: cat,
+      empresa: empresa,
+      codigo: codigo,
+      dueDate: due,
+      lastDone: null,
+      createdAt: Date.now()
+    });
+
+    el.value = '';
+    if(document.getElementById('fixedEmpresa')) document.getElementById('fixedEmpresa').value = '';
+    if(document.getElementById('fixedCodigo')) document.getElementById('fixedCodigo').value = '';
+    if(document.getElementById('fixedDue')) document.getElementById('fixedDue').value = '';
   }
+
   function addTask(){
-    var title = document.getElementById('taskTitle').value.trim();
+    var el = document.getElementById('taskTitle');
+    if(!el) return;
+    var title = el.value.trim();
     if(!title) return;
     var cat = document.getElementById('taskCat').value;
     var due = document.getElementById('taskDue').value || null;
     var pri = document.getElementById('taskPri').value;
-    getStorage().collection('tasks_oneoff').doc(uid()).set({ title:title, category:cat, dueDate:due, priority:pri, done:false, createdAt: Date.now() });
-    document.getElementById('taskTitle').value = '';
+    var empresa = (document.getElementById('taskEmpresa') ? document.getElementById('taskEmpresa').value.trim() : "") || null;
+    var codigo = (document.getElementById('taskCodigo') ? document.getElementById('taskCodigo').value.trim() : "") || null;
+
+    getStorage().collection('tasks_oneoff').doc(uid()).set({
+      title: title,
+      category: cat,
+      dueDate: due,
+      priority: pri,
+      empresa: empresa,
+      codigo: codigo,
+      done: false,
+      completedAt: null,
+      createdAt: Date.now()
+    });
+
+    el.value = '';
+    if(document.getElementById('taskEmpresa')) document.getElementById('taskEmpresa').value = '';
+    if(document.getElementById('taskCodigo')) document.getElementById('taskCodigo').value = '';
     document.getElementById('taskDue').value = '';
   }
 
@@ -385,12 +450,14 @@
   }
 
   function addEmpresa(){
-    var nome = document.getElementById('implEmpresa').value.trim();
+    var nomeEl = document.getElementById('implEmpresa');
+    if(!nomeEl) return;
+    var nome = nomeEl.value.trim();
     if(!nome) return;
     var codigo = document.getElementById('implCodigo').value.trim();
     var inicio = document.getElementById('implInicio').value || todayStr();
     getStorage().collection('implantacoes').doc(uid()).set({ empresa:nome, codigo: codigo||null, dataInicio:inicio, status:'em_andamento', demandas:[], createdAt: Date.now() });
-    document.getElementById('implEmpresa').value = '';
+    nomeEl.value = '';
     document.getElementById('implCodigo').value = '';
     document.getElementById('implInicio').value = '';
   }
@@ -412,99 +479,136 @@
     getStorage().collection('implantacoes').doc(implId).update({ demandas: fn(impl.demandas||[]) });
   }
 
-  document.addEventListener('click', function(e){
-    var b = e.target.closest('[data-act]');
-    if(!b) return;
-    var act = b.dataset.act, id = b.dataset.id;
-    if(act === 'toggleFixed'){
-      var it = (state.fixed||[]).find(function(x){ return x.id===id; });
-      var today = todayStr();
-      getStorage().collection('tasks_fixed').doc(id).update({ lastDone: (it && it.lastDone===today) ? null : today });
-    } else if(act === 'delFixed'){
-      getStorage().collection('tasks_fixed').doc(id).delete();
-    } else if(act === 'toggleTask'){
-      var t = (state.tasks||[]).find(function(x){ return x.id===id; });
-      getStorage().collection('tasks_oneoff').doc(id).update({ done: !(t && t.done) });
-    } else if(act === 'delTask'){
-      getStorage().collection('tasks_oneoff').doc(id).delete();
-    } else if(act === 'delTicket'){
-      getStorage().collection('tickets').doc(id).delete();
-    } else if(act === 'clearFollowup'){
-      getStorage().collection('tickets').doc(id).update({ nextFollowUp: null });
-    } else if(act === 'delImpl'){
-      getStorage().collection('implantacoes').doc(id).delete();
-    } else if(act === 'addDemanda'){
-      var input = document.querySelector('[data-act="demandaInput"][data-id="'+id+'"]');
-      if(input) addDemanda(id, input);
-    } else if(act === 'toggleDemanda'){
-      var demandaId = b.dataset.demanda;
-      updateDemandas(id, function(list){
-        return list.map(function(d){
-          if(d.id !== demandaId) return d;
-          var nowDone = !d.concluida;
-          return Object.assign({}, d, { concluida: nowDone, dataFechamento: nowDone ? (d.dataFechamento || todayStr()) : d.dataFechamento });
+  function setupEvents(){
+    document.addEventListener('click', function(e){
+      var b = e.target.closest('[data-act]');
+      if(!b) return;
+      var act = b.dataset.act, id = b.dataset.id;
+      if(act === 'toggleFixed'){
+        var it = (state.fixed||[]).find(function(x){ return x.id===id; });
+        var today = todayStr();
+        var isDone = (it && it.lastDone === today);
+        getStorage().collection('tasks_fixed').doc(id).update({ lastDone: isDone ? null : today });
+      } else if(act === 'delFixed'){
+        getStorage().collection('tasks_fixed').doc(id).delete();
+      } else if(act === 'toggleTask'){
+        var t = (state.tasks||[]).find(function(x){ return x.id===id; });
+        var nowDone = !(t && t.done);
+        getStorage().collection('tasks_oneoff').doc(id).update({
+          done: nowDone,
+          completedAt: nowDone ? todayStr() : null
         });
-      });
-    } else if(act === 'delDemanda'){
-      var demandaId2 = b.dataset.demanda;
-      updateDemandas(id, function(list){ return list.filter(function(d){ return d.id !== demandaId2; }); });
-    }
-  });
+      } else if(act === 'delTask'){
+        getStorage().collection('tasks_oneoff').doc(id).delete();
+      } else if(act === 'delTicket'){
+        getStorage().collection('tickets').doc(id).delete();
+      } else if(act === 'clearFollowup'){
+        getStorage().collection('tickets').doc(id).update({ nextFollowUp: null });
+      } else if(act === 'delImpl'){
+        getStorage().collection('implantacoes').doc(id).delete();
+      } else if(act === 'addDemanda'){
+        var input = document.querySelector('[data-act="demandaInput"][data-id="'+id+'"]');
+        if(input) addDemanda(id, input);
+      } else if(act === 'toggleDemanda'){
+        var demandaId = b.dataset.demanda;
+        updateDemandas(id, function(list){
+          return list.map(function(d){
+            if(d.id !== demandaId) return d;
+            var nowDone = !d.concluida;
+            return Object.assign({}, d, { concluida: nowDone, dataFechamento: nowDone ? (d.dataFechamento || todayStr()) : d.dataFechamento });
+          });
+        });
+      } else if(act === 'delDemanda'){
+        var demandaId2 = b.dataset.demanda;
+        updateDemandas(id, function(list){ return list.filter(function(d){ return d.id !== demandaId2; }); });
+      }
+    });
 
-  document.addEventListener('change', function(e){
-    var el = e.target.closest('[data-act]');
-    if(!el) return;
-    var act = el.dataset.act, id = el.dataset.id;
-    if(act === 'status'){
-      var upd = { status: el.value };
-      if(el.value === 'fechado') upd.closedAt = todayStr();
-      getStorage().collection('tickets').doc(id).update(upd);
-    } else if(act === 'followup'){
-      getStorage().collection('tickets').doc(id).update({ nextFollowUp: el.value || null });
-    } else if(act === 'implStatus'){
-      getStorage().collection('implantacoes').doc(id).update({ status: el.value });
-    } else if(act === 'implCodigo'){
-      getStorage().collection('implantacoes').doc(id).update({ codigo: el.value.trim() || null });
-    } else if(act === 'demandaData'){
-      var demandaId3 = el.dataset.demanda;
-      updateDemandas(id, function(list){
-        return list.map(function(d){ return d.id===demandaId3 ? Object.assign({}, d, {dataAbertura: el.value || null}) : d; });
-      });
-    } else if(act === 'demandaFechamento'){
-      var demandaId4 = el.dataset.demanda;
-      updateDemandas(id, function(list){
-        return list.map(function(d){ return d.id===demandaId4 ? Object.assign({}, d, {dataFechamento: el.value || null}) : d; });
-      });
-    }
-  });
-  document.addEventListener('blur', function(e){
-    var el = e.target.closest('[data-act="notes"]');
-    if(!el) return;
-    getStorage().collection('tickets').doc(el.dataset.id).update({ notes: el.value.trim() });
-  }, true);
+    document.addEventListener('change', function(e){
+      var el = e.target.closest('[data-act]');
+      if(!el) return;
+      var act = el.dataset.act, id = el.dataset.id;
+      if(act === 'status'){
+        var upd = { status: el.value };
+        if(el.value === 'fechado') upd.closedAt = todayStr();
+        getStorage().collection('tickets').doc(id).update(upd);
+      } else if(act === 'followup'){
+        getStorage().collection('tickets').doc(id).update({ nextFollowUp: el.value || null });
+      } else if(act === 'implStatus'){
+        getStorage().collection('implantacoes').doc(id).update({ status: el.value });
+      } else if(act === 'implCodigo'){
+        getStorage().collection('implantacoes').doc(id).update({ codigo: el.value.trim() || null });
+      } else if(act === 'demandaData'){
+        var demandaId3 = el.dataset.demanda;
+        updateDemandas(id, function(list){
+          return list.map(function(d){ return d.id===demandaId3 ? Object.assign({}, d, {dataAbertura: el.value || null}) : d; });
+        });
+      } else if(act === 'demandaFechamento'){
+        var demandaId4 = el.dataset.demanda;
+        updateDemandas(id, function(list){
+          return list.map(function(d){ return d.id===demandaId4 ? Object.assign({}, d, {dataFechamento: el.value || null}) : d; });
+        });
+      }
+    });
 
-  document.getElementById('addFixedBtn').addEventListener('click', addFixed);
-  document.getElementById('fixedTitle').addEventListener('keydown', function(e){ if(e.key==='Enter') addFixed(); });
-  document.getElementById('addTaskBtn').addEventListener('click', addTask);
-  document.getElementById('taskTitle').addEventListener('keydown', function(e){ if(e.key==='Enter') addTask(); });
-  document.getElementById('newTicketBtn').addEventListener('click', function(){ openTicketPanel(null); });
-  document.getElementById('ticketCancelBtn').addEventListener('click', closeTicketPanel);
-  document.getElementById('ticketSaveBtn').addEventListener('click', saveTicketPanel);
-  document.getElementById('ticketOverlay').addEventListener('click', function(e){ if(e.target.id==='ticketOverlay') closeTicketPanel(); });
-  document.getElementById('lanes').addEventListener('dblclick', function(e){
-    var card = e.target.closest('.ticket');
-    if(card && !e.target.closest('textarea,input,select,button')) openTicketPanel(card.dataset.id);
-  });
-  document.getElementById('addImplBtn').addEventListener('click', addEmpresa);
-  document.getElementById('implEmpresa').addEventListener('keydown', function(e){ if(e.key==='Enter') addEmpresa(); });
-  document.getElementById('implGrid').addEventListener('keydown', function(e){
-    if(e.key==='Enter' && e.target.closest('[data-act="demandaInput"]')){
-      addDemanda(e.target.dataset.id, e.target);
-    }
-  });
-  document.getElementById('t_modulo').innerHTML = '<option value="">Selecione…</option>' + modulosOptionsHtml;
+    document.addEventListener('blur', function(e){
+      var el = e.target.closest('[data-act="notes"]');
+      if(!el) return;
+      getStorage().collection('tickets').doc(el.dataset.id).update({ notes: el.value.trim() });
+    }, true);
 
-  applyTab();
+    var addFixedBtn = document.getElementById('addFixedBtn');
+    if(addFixedBtn) addFixedBtn.addEventListener('click', addFixed);
+
+    ['fixedTitle', 'fixedEmpresa', 'fixedCodigo'].forEach(function(id){
+      var input = document.getElementById(id);
+      if(input) input.addEventListener('keydown', function(e){ if(e.key==='Enter') addFixed(); });
+    });
+
+    var addTaskBtn = document.getElementById('addTaskBtn');
+    if(addTaskBtn) addTaskBtn.addEventListener('click', addTask);
+
+    ['taskTitle', 'taskEmpresa', 'taskCodigo'].forEach(function(id){
+      var input = document.getElementById(id);
+      if(input) input.addEventListener('keydown', function(e){ if(e.key==='Enter') addTask(); });
+    });
+
+    var newTicketBtn = document.getElementById('newTicketBtn');
+    if(newTicketBtn) newTicketBtn.addEventListener('click', function(){ openTicketPanel(null); });
+
+    var ticketCancelBtn = document.getElementById('ticketCancelBtn');
+    if(ticketCancelBtn) ticketCancelBtn.addEventListener('click', closeTicketPanel);
+
+    var ticketSaveBtn = document.getElementById('ticketSaveBtn');
+    if(ticketSaveBtn) ticketSaveBtn.addEventListener('click', saveTicketPanel);
+
+    var ticketOverlay = document.getElementById('ticketOverlay');
+    if(ticketOverlay) ticketOverlay.addEventListener('click', function(e){ if(e.target.id==='ticketOverlay') closeTicketPanel(); });
+
+    var lanes = document.getElementById('lanes');
+    if(lanes) lanes.addEventListener('dblclick', function(e){
+      var card = e.target.closest('.ticket');
+      if(card && !e.target.closest('textarea,input,select,button')) openTicketPanel(card.dataset.id);
+    });
+
+    var addImplBtn = document.getElementById('addImplBtn');
+    if(addImplBtn) addImplBtn.addEventListener('click', addEmpresa);
+
+    var implEmpresa = document.getElementById('implEmpresa');
+    if(implEmpresa) implEmpresa.addEventListener('keydown', function(e){ if(e.key==='Enter') addEmpresa(); });
+
+    var implGrid = document.getElementById('implGrid');
+    if(implGrid) implGrid.addEventListener('keydown', function(e){
+      if(e.key==='Enter' && e.target.closest('[data-act="demandaInput"]')){
+        addDemanda(e.target.dataset.id, e.target);
+      }
+    });
+
+    var moduloSel = document.getElementById('t_modulo');
+    if(moduloSel) moduloSel.innerHTML = '<option value="">Selecione…</option>' + modulosOptionsHtml;
+
+    applyTab();
+  }
 
   function initLocalStorageFallback(){
     state.fixed = LocalStore.get('tasks_fixed');
@@ -515,6 +619,7 @@
   }
 
   function start(){
+    setupEvents();
     if(window.claude && window.claude.use){
       Promise.all([window.claude.use('db'), window.claude.use('user')]).then(function(res){
         db = res[0]; userNS = res[1];
@@ -551,5 +656,9 @@
     }
   }
 
-  if(document.readyState === 'loading'){ document.addEventListener('DOMContentLoaded', start); } else { start(); }
+  if(document.readyState === 'loading'){
+    document.addEventListener('DOMContentLoaded', start);
+  } else {
+    start();
+  }
 })();

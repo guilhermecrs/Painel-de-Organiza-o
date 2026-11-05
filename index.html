@@ -1,11 +1,17 @@
-<!doctype html><html><head><meta charset=utf8><meta name=viewport content="width=device-width,initial-scale=1,viewport-fit=cover"><style>:root{color-scheme:light;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}html{scroll-padding-top:env(safe-area-inset-top,0px)}body{margin:0;padding:0;font:14px -apple-system,BlinkMacSystemFont,sans-serif;background:#fff;color:#000}img{max-width:100%}[hidden]:not([hidden=until-found i]){display:none!important}</style></head><body>
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <title>Mesa de Suporte</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="index.css">
+</head>
+<body>
 <meta name="claude:viewport-fit-sides" content="cover">
-<title>Mesa de Suporte</title>
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Plus+Jakarta+Sans:wght@500;600;700;800&display=swap" rel="stylesheet">
- <link rel="stylesheet" href="index.css">
- 
+
 <div class="wrap">
   <header class="top">
     <div class="top-inner">
@@ -24,6 +30,8 @@
     <h2>Tarefas fixas de hoje</h2>
     <div class="fixed-list" id="fixedList"></div>
     <div class="add-row">
+      <input type="text" id="fixedEmpresa" placeholder="Empresa" style="width:140px">
+      <input type="text" id="fixedCodigo" placeholder="Código" style="width:90px">
       <input type="text" id="fixedTitle" placeholder="Nova tarefa fixa (ex.: conferir fila de e-mails)">
       <select id="fixedCat">
         <option value="outro">Outro</option>
@@ -32,11 +40,14 @@
         <option value="email">E-mail</option>
         <option value="falha">Falha</option>
       </select>
+      <input type="date" id="fixedDue" title="Data de entrega">
       <button class="btn" id="addFixedBtn">Adicionar fixa</button>
     </div>
 
     <h2 style="margin-top:28px">Tarefas avulsas</h2>
     <div class="add-row">
+      <input type="text" id="taskEmpresa" placeholder="Empresa" style="width:140px">
+      <input type="text" id="taskCodigo" placeholder="Código" style="width:90px">
       <input type="text" id="taskTitle" placeholder="Nova tarefa (ex.: abrir chamado para o cliente X)">
       <select id="taskCat">
         <option value="chamado">Chamado</option>
@@ -45,7 +56,7 @@
         <option value="falha">Falha</option>
         <option value="outro">Outro</option>
       </select>
-      <input type="date" id="taskDue">
+      <input type="date" id="taskDue" title="Data de entrega">
       <select id="taskPri">
         <option value="media">Prioridade média</option>
         <option value="alta">Prioridade alta</option>
@@ -146,7 +157,6 @@
   </div>
 </div>
 
-</body>
-
 <script src="index.js" defer></script>
+</body>
 </html>
