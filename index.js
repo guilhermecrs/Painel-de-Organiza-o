@@ -1,15 +1,56 @@
 (function(){
   "use strict";
 
-  var CAT_LABEL = {chamado:"Chamado", usuario:"Usuário", email:"E-mail", falha:"Falha", outro:"Outro"};
-  var CAT_CLASS = {chamado:"cat-chamado", usuario:"cat-usuario", email:"cat-email", falha:"cat-falha", outro:"cat-outro"};
   var ST_LABEL = {aberto:"Aberto", pendente:"Pendente", em_processo:"Em processo", fechado:"Fechado"};
   var ST_ORDER = ["aberto","pendente","em_processo","fechado"];
-  var TIPO_LABEL = {falha:"Falha", duvida:"Dúvida", solicitacao:"Solicitação", melhoria:"Melhoria"};
-  var ASSIGNEE_LABEL = {"ADRIANO":"Adriano", "ALISSON OLIVEIRA":"Alisson Oliveira", "LUCAS":"Lucas", "GABRIEL":"Gabriel", "GUILHERME":"Guilherme"};
-  var MODULOS = ["ORGSMART","DOCUMENTO FISCAL","PROCESSO ALERTA","ATIVO IMOBILIZADO","CRM","ORGTOOLS",
-    "PONTO DE VENDAS","FOLHA","CONTROLE DE ESTOQUE","REEMBOLSO","COMPRAS","AUTENTICAÇÃO","CONSULTA",
-    "CONTABILIDADE","FINANCEIRO","PRESTAÇÃO DE CONTAS","ASSISTÊNCIA SOCIAL"];
+
+  var DEFAULT_OPTIONS = {
+    task_categories: [
+      { id: "chamado", label: "Chamado", color: "blue", builtIn: true },
+      { id: "usuario", label: "Criação de usuário", color: "purple", builtIn: true },
+      { id: "email", label: "E-mail", color: "amber", builtIn: true },
+      { id: "falha", label: "Falha", color: "red", builtIn: true },
+      { id: "outro", label: "Outro", color: "slate", builtIn: true }
+    ],
+    task_priorities: [
+      { id: "baixa", label: "Baixa", color: "slate", builtIn: true },
+      { id: "media", label: "Média", color: "amber", builtIn: true },
+      { id: "alta", label: "Alta", color: "red", builtIn: true }
+    ],
+    ticket_tipos: [
+      { id: "falha", label: "Falha", color: "red", builtIn: true },
+      { id: "duvida", label: "Dúvida", color: "slate", builtIn: true },
+      { id: "solicitacao", label: "Solicitação", color: "blue", builtIn: true },
+      { id: "melhoria", label: "Melhoria", color: "green", builtIn: true }
+    ],
+    ticket_modulos: [
+      "ORGSMART","DOCUMENTO FISCAL","PROCESSO ALERTA","ATIVO IMOBILIZADO","CRM","ORGTOOLS",
+      "PONTO DE VENDAS","FOLHA","CONTROLE DE ESTOQUE","REEMBOLSO","COMPRAS","AUTENTICAÇÃO","CONSULTA",
+      "CONTABILIDADE","FINANCEIRO","PRESTAÇÃO DE CONTAS","ASSISTÊNCIA SOCIAL"
+    ].map(function(m){ return { id: m, label: m, color: "slate", builtIn: true }; }),
+    ticket_assignees: [
+      { id: "ADRIANO", label: "Adriano", color: "blue", builtIn: true },
+      { id: "ALISSON OLIVEIRA", label: "Alisson Oliveira", color: "blue", builtIn: true },
+      { id: "LUCAS", label: "Lucas", color: "blue", builtIn: true },
+      { id: "GABRIEL", label: "Gabriel", color: "blue", builtIn: true },
+      { id: "GUILHERME", label: "Guilherme", color: "blue", builtIn: true }
+    ]
+  };
+
+  var OPTION_META = {
+    task_categories: { title: "Nova Categoria", label: "Nome da categoria *", placeholder: "Ex.: Implantação, Banco de Dados…", selectId: "tk_category", hasColor: true },
+    task_priorities: { title: "Nova Prioridade", label: "Nome da prioridade *", placeholder: "Ex.: Crítica, Urgente, Planejada…", selectId: "tk_priority", hasColor: true },
+    ticket_tipos:    { title: "Novo Tipo de Chamado", label: "Nome do tipo *", placeholder: "Ex.: Bug Crítico, Suporte Remoto…", selectId: "t_tipo", hasColor: true },
+    ticket_modulos:  { title: "Novo Módulo", label: "Nome do módulo *", placeholder: "Ex.: INTEGRAÇÃO API…", selectId: "t_modulo", hasColor: false },
+    ticket_assignees:{ title: "Novo Responsável", label: "Nome do responsável *", placeholder: "Ex.: Carlos Silva…", selectId: "t_assignee", hasColor: false }
+  };
+
+  var COL_COLORS = ["blue", "amber", "purple", "green", "red", "slate"];
+  var DEFAULT_TASK_COLS = [
+    { id: "todo", title: "A Fazer", color: "blue", isDone: false, order: 0 },
+    { id: "doing", title: "Em Andamento", color: "amber", isDone: false, order: 1 },
+    { id: "done", title: "Concluído", color: "green", isDone: true, order: 2 }
+  ];
 
   function todayStr(){ return new Intl.DateTimeFormat('sv-SE').format(new Date()); }
   function fmtDate(s){
@@ -25,8 +66,21 @@
     return 'id-'+Date.now()+'-'+Math.random().toString(16).slice(2);
   }
 
-  var state = { fixed: null, tasks: null, tickets: null, implantacoes: null, canEdit: true };
-  var db = null, userNS = null;
+  var toastTimer = null;
+  function showToast(msg){
+    var el = document.getElementById('toast');
+    if(!el) return;
+    el.textContent = msg;
+    el.hidden = false;
+    if(toastTimer) clearTimeout(toastTimer);
+    toastTimer = setTimeout(function(){ el.hidden = true; }, 3200);
+  }
+
+  var state = { tasks: null, taskColumns: null, tickets: null, implantacoes: null, customOptions: null, canEdit: true };
+  var addingColOpen = false;
+  var newColColor = "blue";
+  var seedingCols = false;
+  var inlineCardColId = null;
 
   var LocalStore = {
     get: function(col) {
@@ -36,19 +90,197 @@
     set: function(col, data) {
       try { localStorage.setItem('app_db_' + col, JSON.stringify(data)); }
       catch(e) {}
+    },
+    getObj: function(key) {
+      try { return JSON.parse(localStorage.getItem('app_db_' + key) || '{}'); }
+      catch(e) { return {}; }
+    },
+    setObj: function(key, data) {
+      try { localStorage.setItem('app_db_' + key, JSON.stringify(data)); }
+      catch(e) {}
     }
   };
 
+  /* --- Gerenciamento de Opções Dinâmicas dos Select Boxes --- */
+  function getOptionsList(group){
+    var defaults = DEFAULT_OPTIONS[group] || [];
+    var custom = (state.customOptions && Array.isArray(state.customOptions[group])) ? state.customOptions[group] : [];
+    var map = {};
+    var out = [];
+    defaults.forEach(function(item){
+      map[item.id] = true;
+      out.push(item);
+    });
+    custom.forEach(function(item){
+      if(item && item.id && !map[item.id]){
+        map[item.id] = true;
+        out.push(item);
+      }
+    });
+    return out;
+  }
+
+  function findOption(group, id){
+    if(!id) return null;
+    var list = getOptionsList(group);
+    return list.find(function(x){ return x.id === id; }) || null;
+  }
+
+  function populateSelectElement(selectEl, group, selectedValue, emptyLabel){
+    if(!selectEl) return;
+    var list = getOptionsList(group);
+    var html = '';
+    if(emptyLabel !== undefined && emptyLabel !== null){
+      html += '<option value="">' + esc(emptyLabel) + '</option>';
+    }
+    list.forEach(function(opt){
+      html += '<option value="' + esc(opt.id) + '">' + esc(opt.label) + '</option>';
+    });
+    selectEl.innerHTML = html;
+    if(selectedValue && list.some(function(o){ return o.id === selectedValue; })){
+      selectEl.value = selectedValue;
+    } else if(emptyLabel !== undefined && emptyLabel !== null && !selectedValue){
+      selectEl.value = "";
+    } else if(list.length){
+      selectEl.value = list[0].id;
+    }
+  }
+
+  function refreshAllSelects(){
+    var catSel = document.getElementById('tk_category');
+    if(catSel) populateSelectElement(catSel, 'task_categories', catSel.value || 'chamado');
+
+    var priSel = document.getElementById('tk_priority');
+    if(priSel) populateSelectElement(priSel, 'task_priorities', priSel.value || 'media');
+
+    var tipoSel = document.getElementById('t_tipo');
+    if(tipoSel) populateSelectElement(tipoSel, 'ticket_tipos', tipoSel.value || 'falha');
+
+    var modSel = document.getElementById('t_modulo');
+    if(modSel) populateSelectElement(modSel, 'ticket_modulos', modSel.value || '', 'Selecione…');
+
+    var assSel = document.getElementById('t_assignee');
+    if(assSel) populateSelectElement(assSel, 'ticket_assignees', assSel.value || '', 'Sem responsável');
+  }
+
+  var activeOptionGroup = null;
+  var selectedOptionColor = "blue";
+
+  function renderOptionModalExtras(){
+    var meta = OPTION_META[activeOptionGroup];
+    if(!meta) return;
+
+    var colorGroup = document.getElementById('optionColorGroup');
+    var colorPicker = document.getElementById('optColorPicker');
+    if(colorGroup && colorPicker){
+      colorGroup.hidden = !meta.hasColor;
+      if(meta.hasColor){
+        colorPicker.innerHTML = COL_COLORS.map(function(c){
+          return '<button type="button" class="color-opt col-color-'+c+(selectedOptionColor===c?' selected':'')+'" data-opt-color="'+c+'" title="Cor '+c+'"></button>';
+        }).join('');
+      }
+    }
+
+    var existingWrap = document.getElementById('optionExistingList');
+    if(existingWrap){
+      var custom = (state.customOptions && state.customOptions[activeOptionGroup]) || [];
+      if(custom.length === 0){
+        existingWrap.innerHTML = '';
+      } else {
+        existingWrap.innerHTML = '<div style="width:100%;font-size:11.5px;color:var(--fg-muted);margin-bottom:2px">Cadastrados por você:</div>' +
+          custom.map(function(item){
+            return '<span class="existing-opt-chip">'+esc(item.label)+
+              '<button type="button" data-del-custom-opt="'+esc(item.id)+'" title="Remover opção">✕</button></span>';
+          }).join('');
+      }
+    }
+  }
+
+  function openOptionModal(group){
+    var meta = OPTION_META[group];
+    if(!meta) return;
+    activeOptionGroup = group;
+    selectedOptionColor = "blue";
+    document.getElementById('optionModalTitle').textContent = meta.title;
+    var lbl = document.getElementById('optionNameLabel');
+    if(lbl && lbl.firstChild) lbl.firstChild.nodeValue = meta.label + "\n        ";
+    var inp = document.getElementById('opt_name');
+    inp.placeholder = meta.placeholder;
+    inp.value = '';
+    renderOptionModalExtras();
+    document.getElementById('optionOverlay').hidden = false;
+    setTimeout(function(){ inp.focus(); }, 20);
+  }
+
+  function closeOptionModal(){
+    document.getElementById('optionOverlay').hidden = true;
+    activeOptionGroup = null;
+  }
+
+  function saveNewOption(){
+    if(!activeOptionGroup) return;
+    var meta = OPTION_META[activeOptionGroup];
+    var inp = document.getElementById('opt_name');
+    var rawLabel = inp.value.trim();
+    if(!rawLabel){ inp.focus(); return; }
+
+    var label = (activeOptionGroup === 'ticket_modulos' || activeOptionGroup === 'ticket_assignees')
+      ? rawLabel.toUpperCase()
+      : rawLabel;
+
+    var existing = getOptionsList(activeOptionGroup).find(function(o){
+      return o.label.toLowerCase() === rawLabel.toLowerCase() || o.id.toLowerCase() === rawLabel.toLowerCase();
+    });
+
+    var targetSelect = document.getElementById(meta.selectId);
+    if(existing){
+      if(targetSelect) targetSelect.value = existing.id;
+      closeOptionModal();
+      showToast('Opção "' + existing.label + '" já existe e foi selecionada.');
+      return;
+    }
+
+    var newId = (activeOptionGroup === 'ticket_modulos' || activeOptionGroup === 'ticket_assignees')
+      ? label
+      : 'opt_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 6);
+
+    var newObj = {
+      id: newId,
+      label: activeOptionGroup === 'ticket_assignees' ? rawLabel : label,
+      color: meta.hasColor ? selectedOptionColor : 'slate',
+      builtIn: false
+    };
+
+    if(!state.customOptions) state.customOptions = {};
+    if(!Array.isArray(state.customOptions[activeOptionGroup])) state.customOptions[activeOptionGroup] = [];
+    state.customOptions[activeOptionGroup].push(newObj);
+    LocalStore.setObj('custom_options', state.customOptions);
+
+    refreshAllSelects();
+    if(targetSelect) targetSelect.value = newId;
+    closeOptionModal();
+    renderAll();
+    showToast('"' + newObj.label + '" cadastrado!');
+  }
+
+  function deleteCustomOption(optId){
+    if(!activeOptionGroup || !state.customOptions || !Array.isArray(state.customOptions[activeOptionGroup])) return;
+    state.customOptions[activeOptionGroup] = state.customOptions[activeOptionGroup].filter(function(x){ return x.id !== optId; });
+    LocalStore.setObj('custom_options', state.customOptions);
+    refreshAllSelects();
+    renderOptionModalExtras();
+    renderAll();
+  }
+
   function notifyLocalChange(col) {
-    if (col === 'tasks_fixed') state.fixed = LocalStore.get('tasks_fixed');
     if (col === 'tasks_oneoff') state.tasks = LocalStore.get('tasks_oneoff');
+    if (col === 'task_columns') state.taskColumns = LocalStore.get('task_columns');
     if (col === 'tickets') state.tickets = LocalStore.get('tickets');
     if (col === 'implantacoes') state.implantacoes = LocalStore.get('implantacoes');
     renderAll();
   }
 
   function getStorage() {
-    if (db) return db;
     return {
       collection: function(col) {
         return {
@@ -86,7 +318,169 @@
     };
   }
 
-  var modulosOptionsHtml = MODULOS.map(function(m){ return '<option value="'+m+'">'+m+'</option>'; }).join('');
+  function getSortedTaskCols(){
+    var cols = (state.taskColumns || []).slice().sort(function(a, b){
+      return (a.order || 0) - (b.order || 0);
+    });
+    return cols.length ? cols : DEFAULT_TASK_COLS;
+  }
+
+  function seedDefaultTaskCols(){
+    if(seedingCols) return;
+    seedingCols = true;
+    var store = getStorage().collection('task_columns');
+    DEFAULT_TASK_COLS.forEach(function(c){
+      store.doc(c.id).set({
+        title: c.title,
+        color: c.color,
+        isDone: !!c.isDone,
+        order: c.order
+      });
+    });
+    seedingCols = false;
+  }
+
+  function normalizeTasksAndColumns(){
+    var cols = getSortedTaskCols();
+    var colsChanged = false;
+
+    if(cols.length > 1 && cols.every(function(c){ return !!c.isDone; })){
+      cols.forEach(function(c){
+        if(c.id !== 'done' && !/conclu/i.test(c.title || '')){
+          c.isDone = false;
+          colsChanged = true;
+        }
+      });
+      if(colsChanged) LocalStore.set('task_columns', cols);
+    }
+
+    var colMap = {};
+    cols.forEach(function(c){ colMap[c.id] = c; });
+    var firstTodoCol = cols.find(function(c){ return !c.isDone; }) || cols[0];
+    var firstDoneCol = cols.find(function(c){ return !!c.isDone; }) || cols[cols.length - 1];
+
+    var tasks = state.tasks || [];
+    var tasksChanged = false;
+
+    tasks.forEach(function(t){
+      var col = t.status && colMap[t.status];
+      if(!col){
+        col = t.done ? firstDoneCol : firstTodoCol;
+        if(col){
+          t.status = col.id;
+          tasksChanged = true;
+        }
+      }
+      if(col){
+        var shouldBeDone = !!col.isDone;
+        if(!!t.done !== shouldBeDone){
+          t.done = shouldBeDone;
+          if(!shouldBeDone) t.completedAt = null;
+          tasksChanged = true;
+        }
+      }
+    });
+
+    if(tasksChanged){
+      LocalStore.set('tasks_oneoff', tasks);
+    }
+  }
+
+  /* --- Exportar & Importar Backup (.json) --- */
+  var pendingBackupData = null;
+
+  function exportBackup(){
+    var payload = {
+      app: "mesa-suporte",
+      version: 2,
+      exportedAt: new Date().toISOString(),
+      data: {
+        tasks_oneoff: state.tasks || LocalStore.get('tasks_oneoff'),
+        task_columns: state.taskColumns || LocalStore.get('task_columns'),
+        tickets: state.tickets || LocalStore.get('tickets'),
+        implantacoes: state.implantacoes || LocalStore.get('implantacoes'),
+        custom_options: state.customOptions || LocalStore.getObj('custom_options')
+      }
+    };
+
+    var jsonStr = JSON.stringify(payload, null, 2);
+    var blob = new Blob([jsonStr], { type: "application/json;charset=utf-8" });
+    var url = URL.createObjectURL(blob);
+    var a = document.createElement('a');
+    a.href = url;
+    a.download = "mesa-suporte-backup-" + todayStr() + ".json";
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+
+    try { localStorage.setItem('app_db_last_backup', new Date().toLocaleString('pt-BR')); } catch(e) {}
+    renderAll();
+    showToast("Backup baixado com sucesso!");
+  }
+
+  function handleImportFileSelected(file){
+    if(!file) return;
+    var reader = new FileReader();
+    reader.onload = function(ev){
+      try {
+        var parsed = JSON.parse(ev.target.result);
+        var data = (parsed && parsed.data) ? parsed.data : parsed;
+        if(!data || (!Array.isArray(data.tasks_oneoff) && !Array.isArray(data.tickets) && !Array.isArray(data.implantacoes))){
+          showToast("Arquivo inválido. Selecione um backup da Mesa de Suporte.");
+          return;
+        }
+        pendingBackupData = {
+          tasks_oneoff: Array.isArray(data.tasks_oneoff) ? data.tasks_oneoff : [],
+          task_columns: Array.isArray(data.task_columns) && data.task_columns.length ? data.task_columns : DEFAULT_TASK_COLS,
+          tickets: Array.isArray(data.tickets) ? data.tickets : [],
+          implantacoes: Array.isArray(data.implantacoes) ? data.implantacoes : [],
+          custom_options: (data.custom_options && typeof data.custom_options === 'object') ? data.custom_options : {}
+        };
+
+        var dateLabel = parsed.exportedAt
+          ? "Arquivo gerado em " + new Date(parsed.exportedAt).toLocaleString('pt-BR') + ":"
+          : "Conteúdo encontrado no arquivo:";
+        document.getElementById('backupModalDate').textContent = dateLabel;
+        document.getElementById('backupModalSummary').innerHTML =
+          '<div>• ' + pendingBackupData.tasks_oneoff.length + ' card(s) de tarefa</div>' +
+          '<div>• ' + pendingBackupData.task_columns.length + ' quadro(s)</div>' +
+          '<div>• ' + pendingBackupData.tickets.length + ' chamado(s)</div>' +
+          '<div>• ' + pendingBackupData.implantacoes.length + ' implantação(ões)</div>';
+
+        document.getElementById('backupOverlay').hidden = false;
+      } catch(err){
+        showToast("Não foi possível ler o arquivo JSON.");
+      }
+    };
+    reader.readAsText(file);
+  }
+
+  function closeBackupModal(){
+    document.getElementById('backupOverlay').hidden = true;
+    pendingBackupData = null;
+  }
+
+  function confirmRestoreBackup(){
+    if(!pendingBackupData) return;
+    LocalStore.set('tasks_oneoff', pendingBackupData.tasks_oneoff);
+    LocalStore.set('task_columns', pendingBackupData.task_columns);
+    LocalStore.set('tickets', pendingBackupData.tickets);
+    LocalStore.set('implantacoes', pendingBackupData.implantacoes);
+    LocalStore.setObj('custom_options', pendingBackupData.custom_options);
+
+    state.tasks = pendingBackupData.tasks_oneoff;
+    state.taskColumns = pendingBackupData.task_columns;
+    state.tickets = pendingBackupData.tickets;
+    state.implantacoes = pendingBackupData.implantacoes;
+    state.customOptions = pendingBackupData.custom_options;
+
+    refreshAllSelects();
+    normalizeTasksAndColumns();
+    closeBackupModal();
+    renderAll();
+    showToast("Backup restaurado com sucesso!");
+  }
 
   function renderSummary(){
     var el = document.getElementById('summary');
@@ -109,60 +503,36 @@
   }
 
   function checkSvg(){ return '<svg viewBox="0 0 16 16" fill="none"><path d="M3 8.5L6.2 11.5L13 4.5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>'; }
-  function trashSvg(){ return '<svg width="15" height="15" viewBox="0 0 24 24" fill="none"><path d="M4 7h16M9 7V4h6v3M6 7l1 14h10l1-14" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>'; }
+  function trashSvg(){ return '<svg width="14" height="14" viewBox="0 0 24 24" fill="none"><path d="M4 7h16M9 7V4h6v3M6 7l1 14h10l1-14" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>'; }
 
-  function renderFixed(){
-    var list = document.getElementById('fixedList');
-    if(!list) return;
-    var items = state.fixed;
-    if(items === null){
-      list.innerHTML = '<div class="empty">Carregando…</div>';
-      return;
-    }
-    if(items.length === 0){
-      list.innerHTML = '<div class="empty"><div class="big">Nenhuma tarefa fixa ainda</div>Adicione as rotinas que se repetem todo dia.</div>';
-      return;
-    }
-    var today = todayStr();
-    list.innerHTML = items.map(function(it){
-      var done = it.lastDone === today;
-      var empStr = (it.empresa ? esc(it.empresa) : '') + (it.codigo ? ' (' + esc(it.codigo) + ')' : '');
-      var dueHtml = it.dueDate ? '<span class="due" style="font-weight:600">Entrega: ' + fmtDate(it.dueDate) + '</span>' : '';
-      var doneHtml = (done && it.lastDone) ? '<span class="tag tipo-melhoria">Concluído em ' + fmtDate(it.lastDone) + '</span>' : '';
+  function taskCardHtml(t, today, isDoneCol){
+    var late = !isDoneCol && t.dueDate && t.dueDate < today;
+    var isToday = !isDoneCol && t.dueDate === today;
 
-      return '<div class="fixed-item'+(done?' done':'')+'" data-id="'+it.id+'">'+
-        '<button class="check'+(done?' on':'')+'" data-act="toggleFixed" data-id="'+it.id+'" aria-label="Concluir">'+(done?checkSvg():'')+'</button>'+
-        '<div style="flex:1;min-width:0;display:flex;flex-direction:column;gap:4px">'+
-          '<span class="title">'+esc(it.title)+'</span>'+
-          '<div style="display:flex;gap:8px;align-items:center;font-size:12px;color:var(--fg-muted);flex-wrap:wrap">'+
-            (empStr ? '<span class="tag modulo">'+empStr+'</span>' : '')+
-            dueHtml+
-            doneHtml+
-          '</div>'+
-        '</div>'+
-        '<span class="tag '+CAT_CLASS[it.category]+'">'+CAT_LABEL[it.category]+'</span>'+
-        '<button class="icon-btn" data-act="delFixed" data-id="'+it.id+'" title="Remover">'+trashSvg()+'</button>'+
-      '</div>';
-    }).join('');
-  }
+    var priId = t.priority || 'media';
+    var priOpt = findOption('task_priorities', priId) || { id: priId, label: priId, color: 'amber' };
+    var priColor = priOpt.color || 'amber';
 
-  function taskCardHtml(t, today){
-    var late = !t.done && t.dueDate && t.dueDate < today;
-    var isToday = !t.done && t.dueDate === today;
-    var cls = 'task-card pri-'+t.priority + (late?' late':'') + (isToday?' today':'');
-    var dueHtml = t.dueDate ? '<span class="due'+(late?' late':'')+'">Entrega: '+fmtDate(t.dueDate)+'</span>' : '<span>sem prazo</span>';
+    var catId = t.category || 'outro';
+    var catOpt = findOption('task_categories', catId) || { id: catId, label: catId, color: 'slate' };
+    var catColor = catOpt.color || 'slate';
+
+    var cls = 'task-card pri-'+esc(priId) + (late?' late':'') + (isToday?' today':'') + (isDoneCol?' is-done':'');
+    var dueHtml = t.dueDate ? '<span class="due'+(late?' late':'')+'">Entrega: '+fmtDate(t.dueDate)+'</span>' : '';
     var empStr = (t.empresa ? esc(t.empresa) : '') + (t.codigo ? ' (' + esc(t.codigo) + ')' : '');
-    var completedHtml = (t.done && t.completedAt) ? '<span class="tag tipo-melhoria">Concluído em ' + fmtDate(t.completedAt) + '</span>' : '';
+    var validadoHtml = t.validado ? '<span class="tag validado-ok" title="'+(t.validadoEm ? 'Validado em '+fmtDate(t.validadoEm) : 'Validado')+'">✓ Validado p/ sistema</span>' : '';
+    var completedHtml = (isDoneCol && t.completedAt) ? '<span class="tag opt-green">Concluído em ' + fmtDate(t.completedAt) + '</span>' : '';
 
-    return '<div class="'+cls+'" data-id="'+t.id+'">'+
-      '<button class="check'+(t.done?' on':'')+'" data-act="toggleTask" data-id="'+t.id+'" aria-label="Concluir">'+(t.done?checkSvg():'')+'</button>'+
+    return '<div class="'+cls+'" data-id="'+t.id+'" draggable="true">'+
       '<div class="body">'+
         '<div class="title">'+esc(t.title)+'</div>'+
+        (t.notes ? '<div class="excerpt">'+esc(t.notes)+'</div>' : '')+
         '<div class="meta">'+
-          '<span class="pri-dot"></span>'+
+          '<span class="pri-dot c-'+esc(priColor)+'" title="Prioridade: '+esc(priOpt.label)+'"></span>'+
+          validadoHtml+
           dueHtml+
           (empStr ? '<span class="tag modulo">'+empStr+'</span>' : '')+
-          '<span class="tag '+CAT_CLASS[t.category]+'">'+CAT_LABEL[t.category]+'</span>'+
+          '<span class="tag opt-'+esc(catColor)+'">'+esc(catOpt.label)+'</span>'+
           completedHtml+
         '</div>'+
       '</div>'+
@@ -171,53 +541,364 @@
   }
 
   function renderTasks(){
-    var el = document.getElementById('taskGroups');
+    var el = document.getElementById('taskLanes');
     if(!el) return;
     var tasks = state.tasks;
-    if(tasks === null){ el.innerHTML = '<div class="empty">Carregando…</div>'; return; }
-    if(tasks.length === 0){
-      el.innerHTML = '<div class="empty"><div class="big">Nenhuma tarefa avulsa</div>Use o campo acima para registrar uma demanda assim que ela surgir, antes de esquecer.</div>';
+    if(tasks === null || state.taskColumns === null){
+      el.innerHTML = '<div class="empty" style="width:100%">Carregando quadro…</div>';
       return;
     }
-    var today = todayStr();
-    var open = tasks.filter(function(t){ return !t.done; });
-    var done = tasks.filter(function(t){ return t.done; });
-    var late = open.filter(function(t){ return t.dueDate && t.dueDate < today; });
-    var dueToday = open.filter(function(t){ return t.dueDate === today; });
-    var upcoming = open.filter(function(t){ return t.dueDate && t.dueDate > today; }).sort(function(a,b){ return a.dueDate < b.dueDate ? -1 : 1; });
-    var noDate = open.filter(function(t){ return !t.dueDate; });
 
-    function group(label, arr, lateClass){
-      if(arr.length===0) return '';
-      return '<div class="group">'+
-        '<div class="group-head'+(lateClass?' late':'')+'"><span class="label">'+label+'</span><span class="count">'+arr.length+'</span><span class="bar"></span></div>'+
-        arr.map(function(t){ return taskCardHtml(t, today); }).join('') +
+    var today = todayStr();
+    var cols = getSortedTaskCols();
+    var buckets = {};
+    cols.forEach(function(c){ buckets[c.id] = []; });
+
+    var firstTodoCol = cols.find(function(c){ return !c.isDone; }) || cols[0];
+    var firstDoneCol = cols.find(function(c){ return !!c.isDone; }) || cols[cols.length - 1];
+
+    tasks.forEach(function(t){
+      var st = t.status;
+      if(st && buckets[st]){
+        buckets[st].push(t);
+      } else if(t.done && firstDoneCol){
+        buckets[firstDoneCol.id].push(t);
+      } else if(firstTodoCol){
+        buckets[firstTodoCol.id].push(t);
+      }
+    });
+
+    var lanesHtml = cols.map(function(col, idx){
+      var items = buckets[col.id] || [];
+      var canMoveLeft = idx > 0;
+      var canMoveRight = idx < cols.length - 1;
+      var canDelete = cols.length > 1;
+      var isAddingInline = (inlineCardColId === col.id);
+
+      var footerHtml = '<div class="lane-foot">';
+      if(isAddingInline){
+        footerHtml += '<div class="inline-card-form">'+
+          '<textarea id="inlineCardTitleInput" placeholder="Digite o título deste card…"></textarea>'+
+          '<div style="display:flex;gap:6px;align-items:center">'+
+            '<button type="button" class="btn small" data-act="saveInlineCard" data-col="'+esc(col.id)+'">Adicionar card</button>'+
+            '<button type="button" class="btn ghost small" data-act="cancelInlineCard">✕</button>'+
+          '</div>'+
+        '</div>';
+      } else {
+        footerHtml += '<button type="button" class="add-card-inline-btn" data-act="openInlineCard" data-col="'+esc(col.id)+'">+ Adicionar um card</button>';
+      }
+      footerHtml += '</div>';
+
+      return '<div class="lane task-lane" data-st="'+esc(col.id)+'">'+
+        '<div class="lane-head">'+
+          '<button class="col-color-btn col-color-'+esc(col.color||'blue')+'" data-act="cycleColColor" data-id="'+esc(col.id)+'" title="Trocar cor do quadro"></button>'+
+          '<span class="lane-title" data-act="editColTitle" data-id="'+esc(col.id)+'" title="Clique para renomear">'+esc(col.title)+'</span>'+
+          '<span class="n">'+items.length+'</span>'+
+          '<div class="lane-tools">'+
+            '<button class="lane-mini-btn'+(col.isDone?' is-done-col':'')+'" data-act="toggleColDone" data-id="'+esc(col.id)+'" title="'+(col.isDone?'Etapa de conclusão (clique para tornar etapa normal)':'Marcar este quadro como etapa de conclusão')+'">✓</button>'+
+            (canMoveLeft ? '<button class="lane-mini-btn" data-act="moveColLeft" data-id="'+esc(col.id)+'" title="Mover para esquerda">‹</button>' : '')+
+            (canMoveRight ? '<button class="lane-mini-btn" data-act="moveColRight" data-id="'+esc(col.id)+'" title="Mover para direita">›</button>' : '')+
+            (canDelete ? '<button class="lane-mini-btn del" data-act="delCol" data-id="'+esc(col.id)+'" title="Excluir quadro">'+trashSvg()+'</button>' : '')+
+          '</div>'+
+        '</div>'+
+        '<div class="lane-body task-lane-body">'+
+          (items.length ? items.map(function(t){ return taskCardHtml(t, today, !!col.isDone); }).join('') : '<div class="lane-empty">Arraste um card ou adicione abaixo</div>') +
+        '</div>'+
+        footerHtml+
+      '</div>';
+    }).join('');
+
+    var addBoxHtml = '<div class="add-lane-wrap">';
+    if(!addingColOpen){
+      addBoxHtml += '<button class="add-lane-trigger" data-act="openAddCol">+ Adicionar outro quadro</button>';
+    } else {
+      addBoxHtml += '<div class="add-lane-form">'+
+        '<input type="text" id="newColTitleInput" placeholder="Nome do quadro (ex.: Validação / Homologação)">'+
+        '<div class="color-picker-row">'+
+          COL_COLORS.map(function(c){
+            return '<button type="button" class="color-opt col-color-'+c+(newColColor===c?' selected':'')+'" data-act="pickNewColColor" data-color="'+c+'" title="Cor '+c+'"></button>';
+          }).join('')+
+        '</div>'+
+        '<label class="done-check-label"><input type="checkbox" id="newColDoneCheck"> Concluir tarefa ao mover para cá</label>'+
+        '<div class="add-lane-actions">'+
+          '<button type="button" class="btn small" data-act="saveNewCol">Adicionar quadro</button>'+
+          '<button type="button" class="btn ghost small" data-act="cancelAddCol">✕</button>'+
+        '</div>'+
       '</div>';
     }
+    addBoxHtml += '</div>';
 
-    var html = '';
-    html += group('Atrasadas', late, true);
-    html += group('Hoje', dueToday, false);
-    html += group('Próximos dias', upcoming, false);
-    html += group('Sem prazo', noDate, false);
+    el.innerHTML = lanesHtml + addBoxHtml;
 
-    if(done.length){
-      html += '<details class="collapsible"><summary>Concluídas ('+done.length+')</summary>'+
-        done.map(function(t){ return taskCardHtml(t, today); }).join('') +
-      '</details>';
+    if(addingColOpen){
+      var inp = document.getElementById('newColTitleInput');
+      if(inp) inp.focus();
+    } else if(inlineCardColId){
+      var cardInp = document.getElementById('inlineCardTitleInput');
+      if(cardInp) cardInp.focus();
     }
-    el.innerHTML = html || '<div class="empty">Tudo em dia por aqui.</div>';
   }
 
+  /* --- Modal / Sub-aba de Edição e Validação do Card --- */
+  var editingTaskId = null;
+
+  function syncValidationBadgeUI(){
+    var chk = document.getElementById('tk_validado');
+    var box = document.getElementById('validationBox');
+    var badge = document.getElementById('tk_valStatusBadge');
+    var msg = document.getElementById('tk_validationMsg');
+    if(!chk || !box || !badge) return;
+    if(msg) msg.hidden = true;
+    if(chk.checked){
+      box.classList.add('is-validated');
+      badge.classList.add('ok');
+      badge.textContent = '✓ Validado p/ sistema';
+    } else {
+      box.classList.remove('is-validated');
+      badge.classList.remove('ok');
+      badge.textContent = 'Pendente de validação';
+    }
+  }
+
+  function openTaskPanel(id, defaultColId){
+    editingTaskId = id || null;
+    var t = id ? (state.tasks||[]).find(function(x){ return x.id===id; }) : null;
+    var cols = getSortedTaskCols();
+
+    var statusSel = document.getElementById('tk_status');
+    statusSel.innerHTML = cols.map(function(c){
+      return '<option value="'+esc(c.id)+'">'+esc(c.title)+'</option>';
+    }).join('');
+
+    var defaultCol = defaultColId || (cols.find(function(c){ return !c.isDone; }) || cols[0]).id;
+
+    document.getElementById('taskModalKicker').textContent = t ? 'Editar & Validar Card' : 'Novo Card no Quadro';
+    document.getElementById('taskModalTitle').textContent = t ? t.title : 'Criar nova tarefa';
+    document.getElementById('tk_title').value = t ? (t.title||'') : '';
+    document.getElementById('tk_empresa').value = t ? (t.empresa||'') : '';
+    document.getElementById('tk_codigo').value = t ? (t.codigo||'') : '';
+    statusSel.value = (t && t.status && cols.some(function(c){ return c.id===t.status; })) ? t.status : defaultCol;
+
+    populateSelectElement(document.getElementById('tk_category'), 'task_categories', t ? (t.category||'chamado') : 'chamado');
+    populateSelectElement(document.getElementById('tk_priority'), 'task_priorities', t ? (t.priority||'media') : 'media');
+
+    document.getElementById('tk_dueDate').value = t ? (t.dueDate||'') : '';
+    document.getElementById('tk_completedAt').value = t ? (t.completedAt||'') : '';
+    document.getElementById('tk_notes').value = t ? (t.notes||'') : '';
+
+    document.getElementById('tk_validado').checked = !!(t && t.validado);
+    document.getElementById('tk_validadoPor').value = t ? (t.validadoPor||'') : '';
+    document.getElementById('tk_validacaoObs').value = t ? (t.validacaoObs||'') : '';
+
+    var delBtn = document.getElementById('taskDeleteBtn');
+    if(delBtn) delBtn.hidden = !t;
+
+    syncValidationBadgeUI();
+    document.getElementById('taskOverlay').hidden = false;
+    setTimeout(function(){ document.getElementById('tk_title').focus(); }, 20);
+  }
+
+  function closeTaskPanel(){
+    document.getElementById('taskOverlay').hidden = true;
+    editingTaskId = null;
+  }
+
+  function showTaskValidationError(text){
+    var msg = document.getElementById('tk_validationMsg');
+    if(!msg) return;
+    msg.textContent = text;
+    msg.hidden = false;
+  }
+
+  function saveTaskPanel(){
+    var titleEl = document.getElementById('tk_title');
+    var title = titleEl.value.trim();
+    if(!title){
+      showTaskValidationError('Informe o título da tarefa antes de salvar.');
+      titleEl.focus();
+      return;
+    }
+
+    var empresa = document.getElementById('tk_empresa').value.trim() || null;
+    var codigo = document.getElementById('tk_codigo').value.trim() || null;
+    var status = document.getElementById('tk_status').value;
+    var category = document.getElementById('tk_category').value;
+    var priority = document.getElementById('tk_priority').value;
+    var dueDate = document.getElementById('tk_dueDate').value || null;
+    var completedAtInput = document.getElementById('tk_completedAt').value || null;
+    var notes = document.getElementById('tk_notes').value.trim() || null;
+
+    var validado = document.getElementById('tk_validado').checked;
+    var validadoPor = document.getElementById('tk_validadoPor').value.trim() || null;
+    var validacaoObs = document.getElementById('tk_validacaoObs').value.trim() || null;
+
+    if(validado && !empresa && !notes){
+      showTaskValidationError('Para validar para o sistema, preencha ao menos a Empresa ou a Descrição do card.');
+      return;
+    }
+
+    var targetCol = getSortedTaskCols().find(function(c){ return c.id === status; });
+    var isDoneCol = !!(targetCol && targetCol.isDone);
+    var existing = editingTaskId ? (state.tasks||[]).find(function(x){ return x.id === editingTaskId; }) : null;
+
+    var data = {
+      title: title,
+      empresa: empresa,
+      codigo: codigo,
+      status: status,
+      category: category,
+      priority: priority,
+      dueDate: dueDate,
+      notes: notes,
+      done: isDoneCol,
+      completedAt: isDoneCol ? (completedAtInput || (existing && existing.completedAt) || todayStr()) : null,
+      validado: validado,
+      validadoPor: validado ? validadoPor : null,
+      validacaoObs: validado ? validacaoObs : null,
+      validadoEm: validado ? ((existing && existing.validadoEm) || todayStr()) : null,
+      updatedAt: Date.now()
+    };
+
+    if(editingTaskId){
+      getStorage().collection('tasks_oneoff').doc(editingTaskId).update(data);
+    } else {
+      data.createdAt = Date.now();
+      getStorage().collection('tasks_oneoff').doc(uid()).set(data);
+    }
+
+    closeTaskPanel();
+  }
+
+  function saveInlineCard(colId){
+    var inp = document.getElementById('inlineCardTitleInput');
+    if(!inp) return;
+    var title = inp.value.trim();
+    if(!title){
+      inlineCardColId = null;
+      renderTasks();
+      return;
+    }
+    var targetCol = getSortedTaskCols().find(function(c){ return c.id === colId; });
+    var isDoneCol = !!(targetCol && targetCol.isDone);
+
+    inlineCardColId = null;
+    getStorage().collection('tasks_oneoff').doc(uid()).set({
+      title: title,
+      category: 'chamado',
+      dueDate: null,
+      priority: 'media',
+      empresa: null,
+      codigo: null,
+      notes: null,
+      status: colId,
+      done: isDoneCol,
+      completedAt: isDoneCol ? todayStr() : null,
+      validado: false,
+      validadoPor: null,
+      validacaoObs: null,
+      validadoEm: null,
+      createdAt: Date.now()
+    });
+  }
+
+  function saveNewTaskColumn(){
+    var inp = document.getElementById('newColTitleInput');
+    if(!inp) return;
+    var title = inp.value.trim();
+    if(!title){ inp.focus(); return; }
+    var isDone = !!(document.getElementById('newColDoneCheck') && document.getElementById('newColDoneCheck').checked);
+    var cols = getSortedTaskCols();
+    var maxOrder = cols.reduce(function(max, c){ return Math.max(max, c.order || 0); }, -1);
+
+    addingColOpen = false;
+    getStorage().collection('task_columns').doc(uid()).set({
+      title: title,
+      color: newColColor,
+      isDone: isDone,
+      order: maxOrder + 1
+    });
+    newColColor = "blue";
+  }
+
+  function startEditColTitle(spanEl, colId){
+    var currentTitle = spanEl.textContent;
+    var input = document.createElement('input');
+    input.type = 'text';
+    input.className = 'lane-title-input';
+    input.value = currentTitle;
+    spanEl.replaceWith(input);
+    input.focus();
+    input.select();
+
+    var finished = false;
+    function commit(){
+      if(finished) return;
+      finished = true;
+      var val = input.value.trim();
+      if(val && val !== currentTitle){
+        getStorage().collection('task_columns').doc(colId).update({ title: val });
+      } else {
+        renderTasks();
+      }
+    }
+
+    input.addEventListener('blur', commit);
+    input.addEventListener('keydown', function(e){
+      if(e.key === 'Enter'){ e.preventDefault(); commit(); }
+      if(e.key === 'Escape'){ finished = true; renderTasks(); }
+    });
+  }
+
+  function moveTaskColumn(colId, dir){
+    var cols = getSortedTaskCols();
+    var idx = cols.findIndex(function(c){ return c.id === colId; });
+    var targetIdx = idx + dir;
+    if(idx < 0 || targetIdx < 0 || targetIdx >= cols.length) return;
+
+    var temp = cols[idx];
+    cols[idx] = cols[targetIdx];
+    cols[targetIdx] = temp;
+
+    var store = getStorage().collection('task_columns');
+    cols.forEach(function(c, i){
+      store.doc(c.id).update({ order: i });
+    });
+  }
+
+  function deleteTaskColumn(colId){
+    var cols = getSortedTaskCols();
+    if(cols.length <= 1) return;
+    var remaining = cols.filter(function(c){ return c.id !== colId; });
+    var fallback = remaining.find(function(c){ return !c.isDone; }) || remaining[0];
+
+    var tasksStore = getStorage().collection('tasks_oneoff');
+    (state.tasks || []).forEach(function(t){
+      if(t.status === colId){
+        tasksStore.doc(t.id).update({
+          status: fallback.id,
+          done: !!fallback.isDone,
+          completedAt: fallback.isDone ? (t.completedAt || todayStr()) : null
+        });
+      }
+    });
+
+    getStorage().collection('task_columns').doc(colId).delete();
+  }
+
+  /* --- Chamados --- */
   function ticketCardHtml(t, today){
     var alert = t.status !== 'fechado' && t.nextFollowUp && t.nextFollowUp <= today;
+    var tipoOpt = t.tipo ? (findOption('ticket_tipos', t.tipo) || { label: t.tipo, color: 'slate' }) : null;
+    var modOpt = t.modulo ? (findOption('ticket_modulos', t.modulo) || { label: t.modulo }) : null;
+    var assOpt = t.assignee ? (findOption('ticket_assignees', t.assignee) || { label: t.assignee }) : null;
+
     var html = '<div class="ticket'+(alert?' due-alert':'')+'" data-id="'+t.id+'">';
     if(alert) html += '<span class="chip-alert">Cobrar hoje</span>';
     html += '<div class="row1"><div><div class="client">'+esc(t.client)+'</div><div class="subject">'+esc(t.subject)+'</div></div></div>';
     html += '<div style="display:flex;gap:6px;flex-wrap:wrap">'+
-      (t.tipo ? '<span class="tag tipo-'+t.tipo+'">'+TIPO_LABEL[t.tipo]+'</span>' : '') +
-      (t.modulo ? '<span class="tag modulo">'+esc(t.modulo)+'</span>' : '') +
-      (t.assignee ? '<span class="tag assignee">'+esc(ASSIGNEE_LABEL[t.assignee]||t.assignee)+'</span>' : '') +
+      (tipoOpt ? '<span class="tag opt-'+esc(tipoOpt.color||'slate')+'">'+esc(tipoOpt.label)+'</span>' : '') +
+      (modOpt ? '<span class="tag modulo">'+esc(modOpt.label)+'</span>' : '') +
+      (assOpt ? '<span class="tag assignee">'+esc(assOpt.label)+'</span>' : '') +
     '</div>';
     html += '<div class="dates"><span>Aberto <b>'+fmtDate(t.openedAt)+'</b></span>'+
       (t.expectedClose ? '<span>Previsão <b>'+fmtDate(t.expectedClose)+'</b></span>' : '') +
@@ -267,6 +948,7 @@
     }).join('');
   }
 
+  /* --- Implantações --- */
   function implCardHtml(i){
     var done = i.status === 'concluida';
     var demandas = i.demandas || [];
@@ -324,14 +1006,16 @@
 
   function renderAll(){
     renderSummary();
-    renderFixed();
     renderTasks();
     renderLanes();
     renderImplantacoes();
     var hintEl = document.getElementById('hint');
     if(hintEl){
-      var loaded = state.fixed !== null && state.tasks !== null && state.tickets !== null && state.implantacoes !== null;
-      hintEl.textContent = loaded ? 'Seus dados ficam salvos automaticamente neste sistema.' : 'Carregando seus dados…';
+      var lastBackup = null;
+      try { lastBackup = localStorage.getItem('app_db_last_backup'); } catch(e) {}
+      hintEl.textContent = lastBackup
+        ? 'Salvo automaticamente neste navegador · Último backup exportado em ' + lastBackup
+        : 'Salvo automaticamente neste navegador · Use "Exportar backup" no topo para salvar uma cópia de segurança.';
     }
   }
 
@@ -349,61 +1033,6 @@
   }
   window.addEventListener('hashchange', applyTab);
 
-  function addFixed(){
-    var el = document.getElementById('fixedTitle');
-    if(!el) return;
-    var title = el.value.trim();
-    if(!title) return;
-    var cat = document.getElementById('fixedCat').value;
-    var empresa = (document.getElementById('fixedEmpresa') ? document.getElementById('fixedEmpresa').value.trim() : "") || null;
-    var codigo = (document.getElementById('fixedCodigo') ? document.getElementById('fixedCodigo').value.trim() : "") || null;
-    var due = (document.getElementById('fixedDue') ? document.getElementById('fixedDue').value : "") || null;
-
-    getStorage().collection('tasks_fixed').doc(uid()).set({
-      title: title,
-      category: cat,
-      empresa: empresa,
-      codigo: codigo,
-      dueDate: due,
-      lastDone: null,
-      createdAt: Date.now()
-    });
-
-    el.value = '';
-    if(document.getElementById('fixedEmpresa')) document.getElementById('fixedEmpresa').value = '';
-    if(document.getElementById('fixedCodigo')) document.getElementById('fixedCodigo').value = '';
-    if(document.getElementById('fixedDue')) document.getElementById('fixedDue').value = '';
-  }
-
-  function addTask(){
-    var el = document.getElementById('taskTitle');
-    if(!el) return;
-    var title = el.value.trim();
-    if(!title) return;
-    var cat = document.getElementById('taskCat').value;
-    var due = document.getElementById('taskDue').value || null;
-    var pri = document.getElementById('taskPri').value;
-    var empresa = (document.getElementById('taskEmpresa') ? document.getElementById('taskEmpresa').value.trim() : "") || null;
-    var codigo = (document.getElementById('taskCodigo') ? document.getElementById('taskCodigo').value.trim() : "") || null;
-
-    getStorage().collection('tasks_oneoff').doc(uid()).set({
-      title: title,
-      category: cat,
-      dueDate: due,
-      priority: pri,
-      empresa: empresa,
-      codigo: codigo,
-      done: false,
-      completedAt: null,
-      createdAt: Date.now()
-    });
-
-    el.value = '';
-    if(document.getElementById('taskEmpresa')) document.getElementById('taskEmpresa').value = '';
-    if(document.getElementById('taskCodigo')) document.getElementById('taskCodigo').value = '';
-    document.getElementById('taskDue').value = '';
-  }
-
   var editingTicketId = null;
   function openTicketPanel(id){
     editingTicketId = id || null;
@@ -411,9 +1040,11 @@
     document.getElementById('ticketPanelTitle').textContent = t ? 'Editar chamado' : 'Novo chamado';
     document.getElementById('t_client').value = t ? t.client : '';
     document.getElementById('t_subject').value = t ? t.subject : '';
-    document.getElementById('t_tipo').value = t ? (t.tipo||'falha') : 'falha';
-    document.getElementById('t_modulo').value = t ? (t.modulo||'') : '';
-    document.getElementById('t_assignee').value = t ? (t.assignee||'') : '';
+
+    populateSelectElement(document.getElementById('t_tipo'), 'ticket_tipos', t ? (t.tipo||'falha') : 'falha');
+    populateSelectElement(document.getElementById('t_modulo'), 'ticket_modulos', t ? (t.modulo||'') : '', 'Selecione…');
+    populateSelectElement(document.getElementById('t_assignee'), 'ticket_assignees', t ? (t.assignee||'') : '', 'Sem responsável');
+
     document.getElementById('t_status').value = t ? t.status : 'aberto';
     document.getElementById('t_opened').value = t ? t.openedAt : todayStr();
     document.getElementById('t_expected').value = t ? (t.expectedClose||'') : '';
@@ -480,47 +1111,173 @@
   }
 
   function setupEvents(){
+    var isDraggingCard = false;
+
+    // Botões de Backup
+    var exportBtn = document.getElementById('exportBackupBtn');
+    if(exportBtn) exportBtn.addEventListener('click', exportBackup);
+
+    var importBtn = document.getElementById('importBackupBtn');
+    var importFile = document.getElementById('importBackupFile');
+    if(importBtn && importFile){
+      importBtn.addEventListener('click', function(){ importFile.click(); });
+      importFile.addEventListener('change', function(){
+        if(importFile.files && importFile.files[0]){
+          handleImportFileSelected(importFile.files[0]);
+          importFile.value = '';
+        }
+      });
+    }
+
+    var backupCloseXBtn = document.getElementById('backupCloseXBtn');
+    if(backupCloseXBtn) backupCloseXBtn.addEventListener('click', closeBackupModal);
+
+    var backupCancelBtn = document.getElementById('backupCancelBtn');
+    if(backupCancelBtn) backupCancelBtn.addEventListener('click', closeBackupModal);
+
+    var backupConfirmBtn = document.getElementById('backupConfirmBtn');
+    if(backupConfirmBtn) backupConfirmBtn.addEventListener('click', confirmRestoreBackup);
+
+    var backupOverlay = document.getElementById('backupOverlay');
+    if(backupOverlay) backupOverlay.addEventListener('click', function(e){
+      if(e.target.id === 'backupOverlay') closeBackupModal();
+    });
+
+    // Eventos do Modal de Cadastro de Nova Opção (+)
+    var optCloseXBtn = document.getElementById('optionCloseXBtn');
+    if(optCloseXBtn) optCloseXBtn.addEventListener('click', closeOptionModal);
+
+    var optCancelBtn = document.getElementById('optionCancelBtn');
+    if(optCancelBtn) optCancelBtn.addEventListener('click', closeOptionModal);
+
+    var optSaveBtn = document.getElementById('optionSaveBtn');
+    if(optSaveBtn) optSaveBtn.addEventListener('click', saveNewOption);
+
+    var optNameInput = document.getElementById('opt_name');
+    if(optNameInput) optNameInput.addEventListener('keydown', function(e){
+      if(e.key === 'Enter'){ e.preventDefault(); saveNewOption(); }
+    });
+
+    var optOverlay = document.getElementById('optionOverlay');
+    if(optOverlay) optOverlay.addEventListener('click', function(e){
+      if(e.target.id === 'optionOverlay') closeOptionModal();
+    });
+
     document.addEventListener('click', function(e){
+      // Botão "+" ao lado de qualquer select
+      var addOptBtn = e.target.closest('[data-add-opt]');
+      if(addOptBtn){
+        e.preventDefault();
+        openOptionModal(addOptBtn.dataset.addOpt);
+        return;
+      }
+
+      // Escolha de cor dentro do modal de nova opção
+      var optColorBtn = e.target.closest('[data-opt-color]');
+      if(optColorBtn){
+        selectedOptionColor = optColorBtn.dataset.optColor || 'blue';
+        renderOptionModalExtras();
+        return;
+      }
+
+      // Excluir opção personalizada
+      var delOptBtn = e.target.closest('[data-del-custom-opt]');
+      if(delOptBtn){
+        deleteCustomOption(delOptBtn.dataset.delCustomOpt);
+        return;
+      }
+
       var b = e.target.closest('[data-act]');
-      if(!b) return;
-      var act = b.dataset.act, id = b.dataset.id;
-      if(act === 'toggleFixed'){
-        var it = (state.fixed||[]).find(function(x){ return x.id===id; });
-        var today = todayStr();
-        var isDone = (it && it.lastDone === today);
-        getStorage().collection('tasks_fixed').doc(id).update({ lastDone: isDone ? null : today });
-      } else if(act === 'delFixed'){
-        getStorage().collection('tasks_fixed').doc(id).delete();
-      } else if(act === 'toggleTask'){
-        var t = (state.tasks||[]).find(function(x){ return x.id===id; });
-        var nowDone = !(t && t.done);
-        getStorage().collection('tasks_oneoff').doc(id).update({
-          done: nowDone,
-          completedAt: nowDone ? todayStr() : null
-        });
-      } else if(act === 'delTask'){
-        getStorage().collection('tasks_oneoff').doc(id).delete();
-      } else if(act === 'delTicket'){
-        getStorage().collection('tickets').doc(id).delete();
-      } else if(act === 'clearFollowup'){
-        getStorage().collection('tickets').doc(id).update({ nextFollowUp: null });
-      } else if(act === 'delImpl'){
-        getStorage().collection('implantacoes').doc(id).delete();
-      } else if(act === 'addDemanda'){
-        var input = document.querySelector('[data-act="demandaInput"][data-id="'+id+'"]');
-        if(input) addDemanda(id, input);
-      } else if(act === 'toggleDemanda'){
-        var demandaId = b.dataset.demanda;
-        updateDemandas(id, function(list){
-          return list.map(function(d){
-            if(d.id !== demandaId) return d;
-            var nowDone = !d.concluida;
-            return Object.assign({}, d, { concluida: nowDone, dataFechamento: nowDone ? (d.dataFechamento || todayStr()) : d.dataFechamento });
+      if(b){
+        var act = b.dataset.act, id = b.dataset.id;
+        if(act === 'delTask'){
+          e.stopPropagation();
+          getStorage().collection('tasks_oneoff').doc(id).delete();
+        } else if(act === 'openInlineCard'){
+          inlineCardColId = b.dataset.col;
+          addingColOpen = false;
+          renderTasks();
+        } else if(act === 'cancelInlineCard'){
+          inlineCardColId = null;
+          renderTasks();
+        } else if(act === 'saveInlineCard'){
+          saveInlineCard(b.dataset.col);
+        } else if(act === 'openAddCol'){
+          addingColOpen = true;
+          inlineCardColId = null;
+          renderTasks();
+        } else if(act === 'cancelAddCol'){
+          addingColOpen = false;
+          renderTasks();
+        } else if(act === 'pickNewColColor'){
+          newColColor = b.dataset.color || 'blue';
+          var curVal = document.getElementById('newColTitleInput') ? document.getElementById('newColTitleInput').value : '';
+          var curChk = document.getElementById('newColDoneCheck') ? document.getElementById('newColDoneCheck').checked : false;
+          renderTasks();
+          if(document.getElementById('newColTitleInput')) document.getElementById('newColTitleInput').value = curVal;
+          if(document.getElementById('newColDoneCheck')) document.getElementById('newColDoneCheck').checked = curChk;
+        } else if(act === 'saveNewCol'){
+          saveNewTaskColumn();
+        } else if(act === 'editColTitle'){
+          startEditColTitle(b, id);
+        } else if(act === 'cycleColColor'){
+          var col = getSortedTaskCols().find(function(c){ return c.id === id; });
+          if(col){
+            var nextIdx = (COL_COLORS.indexOf(col.color || 'blue') + 1) % COL_COLORS.length;
+            getStorage().collection('task_columns').doc(id).update({ color: COL_COLORS[nextIdx] });
+          }
+        } else if(act === 'toggleColDone'){
+          var col2 = getSortedTaskCols().find(function(c){ return c.id === id; });
+          if(col2){
+            var newDoneState = !col2.isDone;
+            getStorage().collection('task_columns').doc(id).update({ isDone: newDoneState });
+            var tasksStore = getStorage().collection('tasks_oneoff');
+            (state.tasks || []).forEach(function(t){
+              if(t.status === id){
+                tasksStore.doc(t.id).update({
+                  done: newDoneState,
+                  completedAt: newDoneState ? (t.completedAt || todayStr()) : null
+                });
+              }
+            });
+            showToast(newDoneState
+              ? 'Quadro "' + col2.title + '" definido como etapa de conclusão.'
+              : 'Quadro "' + col2.title + '" alterado para etapa em aberto.');
+          }
+        } else if(act === 'moveColLeft'){
+          moveTaskColumn(id, -1);
+        } else if(act === 'moveColRight'){
+          moveTaskColumn(id, 1);
+        } else if(act === 'delCol'){
+          deleteTaskColumn(id);
+        } else if(act === 'delTicket'){
+          getStorage().collection('tickets').doc(id).delete();
+        } else if(act === 'clearFollowup'){
+          getStorage().collection('tickets').doc(id).update({ nextFollowUp: null });
+        } else if(act === 'delImpl'){
+          getStorage().collection('implantacoes').doc(id).delete();
+        } else if(act === 'addDemanda'){
+          var input = document.querySelector('[data-act="demandaInput"][data-id="'+id+'"]');
+          if(input) addDemanda(id, input);
+        } else if(act === 'toggleDemanda'){
+          var demandaId = b.dataset.demanda;
+          updateDemandas(id, function(list){
+            return list.map(function(d){
+              if(d.id !== demandaId) return d;
+              var nowDone = !d.concluida;
+              return Object.assign({}, d, { concluida: nowDone, dataFechamento: nowDone ? (d.dataFechamento || todayStr()) : d.dataFechamento });
+            });
           });
-        });
-      } else if(act === 'delDemanda'){
-        var demandaId2 = b.dataset.demanda;
-        updateDemandas(id, function(list){ return list.filter(function(d){ return d.id !== demandaId2; }); });
+        } else if(act === 'delDemanda'){
+          var demandaId2 = b.dataset.demanda;
+          updateDemandas(id, function(list){ return list.filter(function(d){ return d.id !== demandaId2; }); });
+        }
+        return;
+      }
+
+      var taskCard = e.target.closest('.task-card');
+      if(taskCard && !isDraggingCard){
+        openTaskPanel(taskCard.dataset.id);
       }
     });
 
@@ -557,22 +1314,134 @@
       getStorage().collection('tickets').doc(el.dataset.id).update({ notes: el.value.trim() });
     }, true);
 
-    var addFixedBtn = document.getElementById('addFixedBtn');
-    if(addFixedBtn) addFixedBtn.addEventListener('click', addFixed);
+    // --- Drag & Drop (Estilo Trello) para os cards de Tarefas ---
+    var draggingTask = null;
 
-    ['fixedTitle', 'fixedEmpresa', 'fixedCodigo'].forEach(function(id){
-      var input = document.getElementById(id);
-      if(input) input.addEventListener('keydown', function(e){ if(e.key==='Enter') addFixed(); });
+    document.addEventListener('dragstart', function(e){
+      var taskCard = e.target.closest('.task-card');
+      if(taskCard){
+        isDraggingCard = true;
+        draggingTask = taskCard;
+        setTimeout(function(){ taskCard.classList.add('dragging'); }, 0);
+        e.dataTransfer.effectAllowed = 'move';
+        e.dataTransfer.setData('text/plain', taskCard.dataset.id);
+      }
     });
 
-    var addTaskBtn = document.getElementById('addTaskBtn');
-    if(addTaskBtn) addTaskBtn.addEventListener('click', addTask);
-
-    ['taskTitle', 'taskEmpresa', 'taskCodigo'].forEach(function(id){
-      var input = document.getElementById(id);
-      if(input) input.addEventListener('keydown', function(e){ if(e.key==='Enter') addTask(); });
+    document.addEventListener('dragend', function(){
+      if(draggingTask){
+        draggingTask.classList.remove('dragging');
+        draggingTask = null;
+      }
+      document.querySelectorAll('.task-lane-body').forEach(function(el){
+        el.classList.remove('drag-over');
+      });
+      setTimeout(function(){ isDraggingCard = false; }, 50);
     });
 
+    var taskLanesContainer = document.getElementById('taskLanes');
+    if(taskLanesContainer){
+      taskLanesContainer.addEventListener('keydown', function(e){
+        if(e.target && e.target.id === 'newColTitleInput'){
+          if(e.key === 'Enter'){ e.preventDefault(); saveNewTaskColumn(); }
+          if(e.key === 'Escape'){ addingColOpen = false; renderTasks(); }
+        } else if(e.target && e.target.id === 'inlineCardTitleInput'){
+          if(e.key === 'Enter' && !e.shiftKey){
+            e.preventDefault();
+            saveInlineCard(inlineCardColId);
+          }
+          if(e.key === 'Escape'){
+            inlineCardColId = null;
+            renderTasks();
+          }
+        }
+      });
+
+      taskLanesContainer.addEventListener('dragover', function(e){
+        e.preventDefault();
+        var laneBody = e.target.closest('.task-lane-body');
+        if(laneBody){
+          e.dataTransfer.dropEffect = 'move';
+          document.querySelectorAll('.task-lane-body').forEach(function(el){
+            if(el !== laneBody) el.classList.remove('drag-over');
+          });
+          laneBody.classList.add('drag-over');
+        }
+      });
+
+      taskLanesContainer.addEventListener('dragleave', function(e){
+        var laneBody = e.target.closest('.task-lane-body');
+        if(laneBody && (!e.relatedTarget || !laneBody.contains(e.relatedTarget))){
+          laneBody.classList.remove('drag-over');
+        }
+      });
+
+      taskLanesContainer.addEventListener('drop', function(e){
+        e.preventDefault();
+        var laneBody = e.target.closest('.task-lane-body');
+        if(laneBody){
+          laneBody.classList.remove('drag-over');
+          var id = (draggingTask && draggingTask.dataset.id) || e.dataTransfer.getData('text/plain');
+          var lane = laneBody.closest('.task-lane');
+          if(lane && id){
+            var newStatus = lane.dataset.st;
+            var targetCol = getSortedTaskCols().find(function(c){ return c.id === newStatus; });
+            var isDoneCol = !!(targetCol && targetCol.isDone);
+            var upd = { status: newStatus };
+            if(isDoneCol){
+              upd.done = true;
+              upd.completedAt = todayStr();
+            } else {
+              upd.done = false;
+              upd.completedAt = null;
+            }
+            getStorage().collection('tasks_oneoff').doc(id).update(upd);
+          }
+        }
+      });
+    }
+
+    // Eventos do Modal de Edição & Validação de Card
+    var newTaskModalBtn = document.getElementById('newTaskModalBtn');
+    if(newTaskModalBtn) newTaskModalBtn.addEventListener('click', function(){ openTaskPanel(null); });
+
+    var taskCloseXBtn = document.getElementById('taskCloseXBtn');
+    if(taskCloseXBtn) taskCloseXBtn.addEventListener('click', closeTaskPanel);
+
+    var taskCancelBtn = document.getElementById('taskCancelBtn');
+    if(taskCancelBtn) taskCancelBtn.addEventListener('click', closeTaskPanel);
+
+    var taskSaveBtn = document.getElementById('taskSaveBtn');
+    if(taskSaveBtn) taskSaveBtn.addEventListener('click', saveTaskPanel);
+
+    var taskDeleteBtn = document.getElementById('taskDeleteBtn');
+    if(taskDeleteBtn) taskDeleteBtn.addEventListener('click', function(){
+      if(editingTaskId){
+        getStorage().collection('tasks_oneoff').doc(editingTaskId).delete();
+      }
+      closeTaskPanel();
+    });
+
+    var tkValidadoChk = document.getElementById('tk_validado');
+    if(tkValidadoChk) tkValidadoChk.addEventListener('change', syncValidationBadgeUI);
+
+    var taskOverlay = document.getElementById('taskOverlay');
+    if(taskOverlay) taskOverlay.addEventListener('click', function(e){
+      if(e.target.id === 'taskOverlay') closeTaskPanel();
+    });
+
+    document.addEventListener('keydown', function(e){
+      if(e.key === 'Escape'){
+        var optOv = document.getElementById('optionOverlay');
+        if(optOv && !optOv.hidden){ closeOptionModal(); return; }
+        var ov = document.getElementById('taskOverlay');
+        if(ov && !ov.hidden) closeTaskPanel();
+        var bov = document.getElementById('backupOverlay');
+        if(bov && !bov.hidden) closeBackupModal();
+      }
+    });
+
+    // Eventos de Chamados e Implantações
     var newTicketBtn = document.getElementById('newTicketBtn');
     if(newTicketBtn) newTicketBtn.addEventListener('click', function(){ openTicketPanel(null); });
 
@@ -604,56 +1473,22 @@
       }
     });
 
-    var moduloSel = document.getElementById('t_modulo');
-    if(moduloSel) moduloSel.innerHTML = '<option value="">Selecione…</option>' + modulosOptionsHtml;
-
+    refreshAllSelects();
     applyTab();
   }
 
-  function initLocalStorageFallback(){
-    state.fixed = LocalStore.get('tasks_fixed');
+  function start(){
+    state.customOptions = LocalStore.getObj('custom_options');
+    setupEvents();
     state.tasks = LocalStore.get('tasks_oneoff');
+    state.taskColumns = LocalStore.get('task_columns');
     state.tickets = LocalStore.get('tickets');
     state.implantacoes = LocalStore.get('implantacoes');
-    renderAll();
-  }
-
-  function start(){
-    setupEvents();
-    if(window.claude && window.claude.use){
-      Promise.all([window.claude.use('db'), window.claude.use('user')]).then(function(res){
-        db = res[0]; userNS = res[1];
-        if(!db){ initLocalStorageFallback(); return; }
-
-        db.collection('tasks_fixed').onSnapshot(function(snap){
-          state.fixed = snap.docs.map(function(d){ return Object.assign({id:d.id}, d.data()); })
-            .sort(function(a,b){ return (a.createdAt||0) - (b.createdAt||0); });
-          renderAll();
-        }, function(){ initLocalStorageFallback(); });
-
-        db.collection('tasks_oneoff').onSnapshot(function(snap){
-          state.tasks = snap.docs.map(function(d){ return Object.assign({id:d.id}, d.data()); })
-            .sort(function(a,b){ return (a.createdAt||0) - (b.createdAt||0); });
-          renderAll();
-        }, function(){ initLocalStorageFallback(); });
-
-        db.collection('tickets').onSnapshot(function(snap){
-          state.tickets = snap.docs.map(function(d){ return Object.assign({id:d.id}, d.data()); })
-            .sort(function(a,b){ return (b.createdAt||0) - (a.createdAt||0); });
-          renderAll();
-        }, function(){ initLocalStorageFallback(); });
-
-        db.collection('implantacoes').onSnapshot(function(snap){
-          state.implantacoes = snap.docs.map(function(d){ return Object.assign({id:d.id}, d.data()); })
-            .sort(function(a,b){ return (b.createdAt||0) - (a.createdAt||0); });
-          renderAll();
-        }, function(){ initLocalStorageFallback(); });
-      }).catch(function(){
-        initLocalStorageFallback();
-      });
-    } else {
-      initLocalStorageFallback();
+    if(state.taskColumns.length === 0){
+      seedDefaultTaskCols();
     }
+    normalizeTasksAndColumns();
+    renderAll();
   }
 
   if(document.readyState === 'loading'){

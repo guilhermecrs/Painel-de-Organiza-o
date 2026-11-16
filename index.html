@@ -1,7 +1,7 @@
 <!doctype html>
-<html>
+<html lang="pt-BR">
 <head>
-  <meta charset="utf8">
+  <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
   <title>Mesa de Suporte</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -15,56 +15,33 @@
 <div class="wrap">
   <header class="top">
     <div class="top-inner">
-      <div class="brand"><h1>Mesa<span class="dot">·</span>Suporte</h1></div>
+      <div class="brand">
+        <h1>Mesa<span class="dot">·</span>Suporte</h1>
+      </div>
+
       <nav class="tabs" id="tabs">
         <a href="#tarefas" data-tab="tarefas">Tarefas</a>
         <a href="#chamados" data-tab="chamados">Chamados</a>
         <a href="#implantacoes" data-tab="implantacoes">Implantações</a>
       </nav>
+
+      <div class="backup-actions">
+        <button type="button" class="btn ghost small" id="exportBackupBtn" title="Baixar arquivo de segurança com todos os dados">⬇ Exportar backup</button>
+        <button type="button" class="btn ghost small" id="importBackupBtn" title="Restaurar dados de um arquivo .json">⬆ Importar backup</button>
+        <input type="file" id="importBackupFile" accept=".json,application/json" hidden>
+      </div>
     </div>
   </header>
 
   <div class="summary" id="summary"></div>
 
   <section class="view" id="view-tarefas">
-    <h2>Tarefas fixas de hoje</h2>
-    <div class="fixed-list" id="fixedList"></div>
-    <div class="add-row">
-      <input type="text" id="fixedEmpresa" placeholder="Empresa" style="width:140px">
-      <input type="text" id="fixedCodigo" placeholder="Código" style="width:90px">
-      <input type="text" id="fixedTitle" placeholder="Nova tarefa fixa (ex.: conferir fila de e-mails)">
-      <select id="fixedCat">
-        <option value="outro">Outro</option>
-        <option value="chamado">Chamado</option>
-        <option value="usuario">Usuário</option>
-        <option value="email">E-mail</option>
-        <option value="falha">Falha</option>
-      </select>
-      <input type="date" id="fixedDue" title="Data de entrega">
-      <button class="btn" id="addFixedBtn">Adicionar fixa</button>
+    <div class="board-head">
+      <h2 style="margin:0">Quadro de Tarefas</h2>
+      <span class="board-sub">Clique em um card para editar, definir datas ou validar para o sistema</span>
+      <button class="btn" id="newTaskModalBtn" style="margin-left:auto">+ Novo card</button>
     </div>
-
-    <h2 style="margin-top:28px">Tarefas avulsas</h2>
-    <div class="add-row">
-      <input type="text" id="taskEmpresa" placeholder="Empresa" style="width:140px">
-      <input type="text" id="taskCodigo" placeholder="Código" style="width:90px">
-      <input type="text" id="taskTitle" placeholder="Nova tarefa (ex.: abrir chamado para o cliente X)">
-      <select id="taskCat">
-        <option value="chamado">Chamado</option>
-        <option value="usuario">Criação de usuário</option>
-        <option value="email">E-mail</option>
-        <option value="falha">Falha</option>
-        <option value="outro">Outro</option>
-      </select>
-      <input type="date" id="taskDue" title="Data de entrega">
-      <select id="taskPri">
-        <option value="media">Prioridade média</option>
-        <option value="alta">Prioridade alta</option>
-        <option value="baixa">Prioridade baixa</option>
-      </select>
-      <button class="btn" id="addTaskBtn">Adicionar</button>
-    </div>
-    <div id="taskGroups" style="margin-top:14px"></div>
+    <div class="task-lanes" id="taskLanes"></div>
   </section>
 
   <section class="view" id="view-chamados" hidden>
@@ -92,6 +69,144 @@
   <footer class="hint" id="hint">Carregando seus dados…</footer>
 </div>
 
+<!-- Modal / Sub-aba de Edição e Validação do Card -->
+<div class="modal-overlay" id="taskOverlay" hidden>
+  <div class="task-modal">
+    <div class="task-modal-head">
+      <div>
+        <span class="modal-kicker" id="taskModalKicker">Editar Card</span>
+        <h3 id="taskModalTitle">Detalhes da Tarefa</h3>
+      </div>
+      <button type="button" class="icon-btn" id="taskCloseXBtn" title="Fechar">✕</button>
+    </div>
+
+    <div class="task-modal-body">
+      <label>Título da tarefa *
+        <input type="text" id="tk_title" placeholder="Ex.: Configurar emissão de NF-e para cliente">
+      </label>
+
+      <div class="row2">
+        <label>Empresa
+          <input type="text" id="tk_empresa" placeholder="Nome da empresa">
+        </label>
+        <label>Código
+          <input type="text" id="tk_codigo" placeholder="Ex.: 1042">
+        </label>
+      </div>
+
+      <div class="row3">
+        <label>Quadro (Coluna)
+          <select id="tk_status"></select>
+        </label>
+        <label>Categoria
+          <div class="select-with-add">
+            <select id="tk_category"></select>
+            <button type="button" class="add-opt-btn" data-add-opt="task_categories" title="Cadastrar nova categoria">+</button>
+          </div>
+        </label>
+        <label>Prioridade
+          <div class="select-with-add">
+            <select id="tk_priority"></select>
+            <button type="button" class="add-opt-btn" data-add-opt="task_priorities" title="Cadastrar nova prioridade">+</button>
+          </div>
+        </label>
+      </div>
+
+      <div class="row2">
+        <label>Data de entrega
+          <input type="date" id="tk_dueDate">
+        </label>
+        <label>Data de conclusão
+          <input type="date" id="tk_completedAt">
+        </label>
+      </div>
+
+      <label>Descrição / Detalhes do card
+        <textarea id="tk_notes" placeholder="Descreva o que precisa ser feito, links, parâmetros ou detalhes técnicos…"></textarea>
+      </label>
+
+      <div class="validation-box" id="validationBox">
+        <div class="validation-head">
+          <label class="validation-toggle">
+            <input type="checkbox" id="tk_validado">
+            <span>Validado para colocar no sistema</span>
+          </label>
+          <span class="val-badge" id="tk_valStatusBadge">Pendente</span>
+        </div>
+        <div class="row2" style="margin-top:8px">
+          <label>Validado por
+            <input type="text" id="tk_validadoPor" placeholder="Seu nome ou responsável">
+          </label>
+          <label>Observação da validação
+            <input type="text" id="tk_validacaoObs" placeholder="Ex.: Testado em homologação">
+          </label>
+        </div>
+        <div class="val-msg" id="tk_validationMsg" hidden></div>
+      </div>
+    </div>
+
+    <div class="task-modal-foot">
+      <button type="button" class="btn danger ghost-danger" id="taskDeleteBtn">Excluir card</button>
+      <div style="margin-left:auto;display:flex;gap:10px">
+        <button type="button" class="btn ghost" id="taskCancelBtn">Cancelar</button>
+        <button type="button" class="btn" id="taskSaveBtn">Salvar alterações</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Modal Rápido para Cadastrar Nova Opção de Select -->
+<div class="modal-overlay" id="optionOverlay" hidden style="z-index:45">
+  <div class="task-modal" style="max-width:410px">
+    <div class="task-modal-head">
+      <div>
+        <span class="modal-kicker">Personalizar Lista</span>
+        <h3 id="optionModalTitle">Cadastrar nova opção</h3>
+      </div>
+      <button type="button" class="icon-btn" id="optionCloseXBtn" title="Fechar">✕</button>
+    </div>
+    <div class="task-modal-body">
+      <label id="optionNameLabel">Nome da opção *
+        <input type="text" id="opt_name" placeholder="Digite o nome…">
+      </label>
+      <div id="optionColorGroup">
+        <span style="display:block;font-size:12px;font-weight:600;color:var(--fg-muted);margin-bottom:6px">Cor da etiqueta</span>
+        <div class="color-picker-row" id="optColorPicker"></div>
+      </div>
+      <div id="optionExistingList" class="existing-opts-wrap"></div>
+    </div>
+    <div class="task-modal-foot">
+      <button type="button" class="btn ghost" id="optionCancelBtn">Cancelar</button>
+      <button type="button" class="btn" id="optionSaveBtn" style="margin-left:auto">Adicionar opção</button>
+    </div>
+  </div>
+</div>
+
+<!-- Modal de Confirmação de Importação de Backup -->
+<div class="modal-overlay" id="backupOverlay" hidden>
+  <div class="task-modal" style="max-width:460px">
+    <div class="task-modal-head">
+      <div>
+        <span class="modal-kicker">Restaurar Backup</span>
+        <h3>Importar dados do arquivo</h3>
+      </div>
+      <button type="button" class="icon-btn" id="backupCloseXBtn" title="Fechar">✕</button>
+    </div>
+    <div class="task-modal-body">
+      <p style="margin:0;color:var(--fg);font-size:13.5px" id="backupModalDate"></p>
+      <div class="backup-summary-box" id="backupModalSummary"></div>
+      <p style="margin:0;color:var(--fg-muted);font-size:12.5px">
+        Ao confirmar, os dados atuais deste navegador serão substituídos pelos registros do arquivo selecionado.
+      </p>
+    </div>
+    <div class="task-modal-foot">
+      <button type="button" class="btn ghost" id="backupCancelBtn">Cancelar</button>
+      <button type="button" class="btn" id="backupConfirmBtn" style="margin-left:auto">Restaurar agora</button>
+    </div>
+  </div>
+</div>
+
+<!-- Painel Lateral de Chamados -->
 <div class="overlay" id="ticketOverlay" hidden>
   <div class="panel">
     <h3 id="ticketPanelTitle">Novo chamado</h3>
@@ -103,27 +218,24 @@
     </label>
     <div class="row2">
       <label>Tipo de chamado
-        <select id="t_tipo">
-          <option value="falha">Falha</option>
-          <option value="duvida">Dúvida</option>
-          <option value="solicitacao">Solicitação</option>
-          <option value="melhoria">Melhoria</option>
-        </select>
+        <div class="select-with-add">
+          <select id="t_tipo"></select>
+          <button type="button" class="add-opt-btn" data-add-opt="ticket_tipos" title="Cadastrar novo tipo">+</button>
+        </div>
       </label>
       <label>Módulo
-        <select id="t_modulo"></select>
+        <div class="select-with-add">
+          <select id="t_modulo"></select>
+          <button type="button" class="add-opt-btn" data-add-opt="ticket_modulos" title="Cadastrar novo módulo">+</button>
+        </div>
       </label>
     </div>
     <div class="row2">
       <label>Atribuído a
-        <select id="t_assignee">
-          <option value="">Sem responsável</option>
-          <option value="ADRIANO">Adriano</option>
-          <option value="ALISSON OLIVEIRA">Alisson Oliveira</option>
-          <option value="LUCAS">Lucas</option>
-          <option value="GABRIEL">Gabriel</option>
-          <option value="GUILHERME">Guilherme</option>
-        </select>
+        <div class="select-with-add">
+          <select id="t_assignee"></select>
+          <button type="button" class="add-opt-btn" data-add-opt="ticket_assignees" title="Cadastrar novo responsável">+</button>
+        </div>
       </label>
       <label>Status
         <select id="t_status">
@@ -156,6 +268,8 @@
     </div>
   </div>
 </div>
+
+<div class="toast" id="toast" hidden></div>
 
 <script src="index.js" defer></script>
 </body>
