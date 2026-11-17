@@ -33,12 +33,13 @@
     </div>
   </header>
 
+  <!-- Caixas de Resumo com as novas métricas -->
   <div class="summary" id="summary"></div>
 
   <section class="view" id="view-tarefas">
     <div class="board-head">
       <h2 style="margin:0">Quadro de Tarefas</h2>
-      <span class="board-sub">Clique em um card para editar, definir datas ou validar para o sistema</span>
+      <span class="board-sub">Cards são ordenados automaticamente por data de entrega mais próxima.</span>
       <button class="btn" id="newTaskModalBtn" style="margin-left:auto">+ Novo card</button>
     </div>
     <div class="task-lanes" id="taskLanes"></div>
@@ -69,7 +70,7 @@
   <footer class="hint" id="hint">Carregando seus dados…</footer>
 </div>
 
-<!-- Modal / Sub-aba de Edição e Validação do Card -->
+<!-- Modal / Sub-aba de Edição, Histórico e Validação do Card -->
 <div class="modal-overlay" id="taskOverlay" hidden>
   <div class="task-modal">
     <div class="task-modal-head">
@@ -125,6 +126,26 @@
         <textarea id="tk_notes" placeholder="Descreva o que precisa ser feito, links, parâmetros ou detalhes técnicos…"></textarea>
       </label>
 
+      <!-- Seção de Atualizações Automáticas e Comentários -->
+      <div class="activity-box" id="taskActivityBox">
+        <div class="activity-head">
+          <span>Atualizações de Etapa & Comentários</span>
+          <span class="activity-count" id="tk_activityCount">0 registros</span>
+        </div>
+
+        <div class="activity-composer">
+          <div class="row2">
+            <input type="text" id="tk_newCommentStatus" placeholder="O que está ocorrendo agora…">
+            <input type="text" id="tk_newCommentNext" placeholder="O que esperar / próximo passo…">
+          </div>
+          <div style="display:flex;justify-content:flex-end;margin-top:6px">
+            <button type="button" class="btn ghost small" id="tk_addCommentBtn">+ Registrar atualização</button>
+          </div>
+        </div>
+
+        <div class="activity-feed" id="tk_activityFeed"></div>
+      </div>
+
       <div class="validation-box" id="validationBox">
         <div class="validation-head">
           <label class="validation-toggle">
@@ -150,6 +171,37 @@
       <div style="margin-left:auto;display:flex;gap:10px">
         <button type="button" class="btn ghost" id="taskCancelBtn">Cancelar</button>
         <button type="button" class="btn" id="taskSaveBtn">Salvar alterações</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Modal de Configuração de Mensagem Automática do Quadro -->
+<div class="modal-overlay" id="colAutoOverlay" hidden style="z-index:45">
+  <div class="task-modal" style="max-width:480px">
+    <div class="task-modal-head">
+      <div>
+        <span class="modal-kicker">Automação de Movimentação</span>
+        <h3 id="colAutoModalTitle">Quadro: Pendentes</h3>
+      </div>
+      <button type="button" class="icon-btn" id="colAutoCloseXBtn" title="Fechar">✕</button>
+    </div>
+    <div class="task-modal-body">
+      <p style="margin:0;font-size:12.5px;color:var(--fg-muted)">
+        Sempre que um card entrar neste quadro, um comentário automático será gerado com os textos abaixo:
+      </p>
+      <label>O que está ocorrendo neste quadro *
+        <textarea id="ca_occurring" placeholder="Ex.: A tarefa foi pausada porque depende de retorno do cliente ou ajuste técnico."></textarea>
+      </label>
+      <label>O que esperar (Próximo passo) *
+        <textarea id="ca_expecting" placeholder="Ex.: Assim que o retorno chegar, o card voltará para execução. Prazo estimado: 24h a 48h."></textarea>
+      </label>
+    </div>
+    <div class="task-modal-foot">
+      <button type="button" class="btn ghost" id="colAutoResetBtn" title="Restaurar texto sugerido">Restaurar padrão</button>
+      <div style="margin-left:auto;display:flex;gap:8px">
+        <button type="button" class="btn ghost" id="colAutoCancelBtn">Cancelar</button>
+        <button type="button" class="btn" id="colAutoSaveBtn">Salvar regra</button>
       </div>
     </div>
   </div>
@@ -269,6 +321,7 @@
   </div>
 </div>
 
+<!-- Toast com ação rápida para complementar comentário -->
 <div class="toast" id="toast" hidden></div>
 
 <script src="index.js" defer></script>

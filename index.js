@@ -47,15 +47,98 @@
 
   var COL_COLORS = ["blue", "amber", "purple", "green", "red", "slate"];
   var DEFAULT_TASK_COLS = [
-    { id: "todo", title: "A Fazer", color: "blue", isDone: false, order: 0 },
-    { id: "doing", title: "Em Andamento", color: "amber", isDone: false, order: 1 },
-    { id: "done", title: "Concluído", color: "green", isDone: true, order: 2 }
+    {
+      id: "todo",
+      title: "A Fazer",
+      color: "blue",
+      isDone: false,
+      order: 0,
+      autoOccurring: "A demanda foi registrada na fila de atendimento e aguarda início da execução.",
+      autoExpecting: "Assim que um técnico assumir o card, ele será movido para Em Andamento."
+    },
+    {
+      id: "doing",
+      title: "Em Andamento",
+      color: "amber",
+      isDone: false,
+      order: 1,
+      autoOccurring: "A equipe técnica já está analisando e executando esta tarefa.",
+      autoExpecting: "Você receberá uma nova atualização assim que a solução for concluída ou precisar de validação."
+    },
+    {
+      id: "done",
+      title: "Concluído",
+      color: "green",
+      isDone: true,
+      order: 2,
+      autoOccurring: "A atividade foi finalizada e validada com sucesso.",
+      autoExpecting: "Nenhuma ação adicional é necessária no momento."
+    }
   ];
 
-  function todayStr(){ return new Intl.DateTimeFormat('sv-SE').format(new Date()); }
+  /* Gera textos automáticos inteligentes conforme o nome do quadro */
+  function getDefaultColumnAutomation(title, isDone){
+    var t = String(title || "").toLowerCase();
+    if(isDone || /conclu|finaliz|fechad|entregu|pront/.test(t)){
+      return {
+        occurring: "A atividade foi finalizada e entregue conforme solicitado.",
+        expecting: "Nenhuma ação adicional é necessária; o histórico permanece registrado para consulta."
+      };
+    }
+    if(/penden|aguard|bloque|espera|terceir|cliente/.test(t)){
+      return {
+        occurring: "A tarefa foi pausada porque depende de retorno, aprovação ou recurso externo.",
+        expecting: "Assim que a pendência for respondida, o card retornará para a fila de execução."
+      };
+    }
+    if(/valid|homolog|test|revis|confer/.test(t)){
+      return {
+        occurring: "A execução técnica foi concluída e o item está em conferência/homologação.",
+        expecting: "Se aprovado na validação, seguirá para Concluído; caso precise de ajustes, voltará para execução."
+      };
+    }
+    if(/andament|fazend|execu|process|desenvolv/.test(t)){
+      return {
+        occurring: "A equipe técnica já está atuando diretamente nesta demanda.",
+        expecting: "O card será atualizado assim que a etapa técnica for concluída."
+      };
+    }
+    return {
+      occurring: 'O card entrou na etapa "' + (title || "Atual") + '" e está sob acompanhamento.',
+      expecting: "O próximo passo será registrado assim que houver evolução nesta etapa."
+    };
+  }
+
+  function getColumnAutomationTexts(col){
+    if(!col) return getDefaultColumnAutomation("", false);
+    var fallback = getDefaultColumnAutomation(col.title, !!col.isDone);
+    return {
+      occurring: (col.autoOccurring && col.autoOccurring.trim()) ? col.autoOccurring.trim() : fallback.occurring,
+      expecting: (col.autoExpecting && col.autoExpecting.trim()) ? col.autoExpecting.trim() : fallback.expecting
+    };
+  }
+
+  /* FORMATADORES DE DATA CONFIÁVEIS */
+  function todayStr(){
+    // Cria string no formato YYYY-MM-DD usando data local
+    var d = new Date();
+    var y = d.getFullYear();
+    var m = String(d.getMonth() + 1).padStart(2, '0');
+    var day = String(d.getDate()).padStart(2, '0');
+    return y + '-' + m + '-' + day;
+  }
+  function nowDateTimeStr(){
+    var d = new Date();
+    var dd = String(d.getDate()).padStart(2, '0');
+    var mm = String(d.getMonth() + 1).padStart(2, '0');
+    var hh = String(d.getHours()).padStart(2, '0');
+    var mi = String(d.getMinutes()).padStart(2, '0');
+    return dd + "/" + mm + " às " + hh + ":" + mi;
+  }
   function fmtDate(s){
     if(!s) return "";
-    var p = s.split("-"); if(p.length!==3) return s;
+    var p = s.split("-"); 
+    if(p.length!==3) return s;
     return p[2]+"/"+p[1];
   }
   function esc(s){
@@ -67,13 +150,25 @@
   }
 
   var toastTimer = null;
-  function showToast(msg){
+  function showToast(msg, subMsg, actionLabel, onAction){
     var el = document.getElementById('toast');
     if(!el) return;
-    el.textContent = msg;
+    var html = '<div>' + esc(msg) + '</div>';
+    if(subMsg) html += '<div class="toast-sub">' + esc(subMsg) + '</div>';
+    if(actionLabel) html += '<button type="button" class="toast-action" id="toastActionBtn">' + esc(actionLabel) + '</button>';
+    el.innerHTML = html;
     el.hidden = false;
+
+    if(actionLabel && typeof onAction === 'function'){
+      var btn = document.getElementById('toastActionBtn');
+      if(btn) btn.addEventListener('click', function(){
+        el.hidden = true;
+        onAction();
+      });
+    }
+
     if(toastTimer) clearTimeout(toastTimer);
-    toastTimer = setTimeout(function(){ el.hidden = true; }, 3200);
+    toastTimer = setTimeout(function(){ el.hidden = true; }, subMsg ? 5500 : 3200);
   }
 
   var state = { tasks: null, taskColumns: null, tickets: null, implantacoes: null, customOptions: null, canEdit: true };
@@ -334,7 +429,9 @@
         title: c.title,
         color: c.color,
         isDone: !!c.isDone,
-        order: c.order
+        order: c.order,
+        autoOccurring: c.autoOccurring,
+        autoExpecting: c.autoExpecting
       });
     });
     seedingCols = false;
@@ -386,13 +483,109 @@
     }
   }
 
+  /* --- Gerador de Atualização Automática de Movimentação --- */
+  function buildTransitionLogEntry(fromCol, toCol){
+    var texts = getColumnAutomationTexts(toCol);
+    return {
+      id: uid(),
+      type: "auto_move",
+      fromTitle: fromCol ? fromCol.title : "Novo",
+      toTitle: toCol ? toCol.title : "",
+      occurring: texts.occurring,
+      expecting: texts.expecting,
+      timestamp: nowDateTimeStr(),
+      createdAt: Date.now()
+    };
+  }
+
+  function moveTaskToColumn(taskId, newColId, silent){
+    var task = (state.tasks || []).find(function(t){ return t.id === taskId; });
+    if(!task) return;
+    var cols = getSortedTaskCols();
+    var fromCol = cols.find(function(c){ return c.id === task.status; });
+    var toCol = cols.find(function(c){ return c.id === newColId; });
+    if(!toCol) return;
+
+    var isDoneCol = !!toCol.isDone;
+    var history = Array.isArray(task.updatesLog) ? task.updatesLog.slice() : [];
+    var entry = null;
+
+    if(task.status !== newColId){
+      entry = buildTransitionLogEntry(fromCol, toCol);
+      history.unshift(entry);
+    }
+
+    var upd = {
+      status: newColId,
+      done: isDoneCol,
+      completedAt: isDoneCol ? (task.completedAt || todayStr()) : null,
+      updatesLog: history,
+      updatedAt: Date.now()
+    };
+
+    getStorage().collection('tasks_oneoff').doc(taskId).update(upd);
+
+    if(entry && !silent){
+      showToast(
+        entry.fromTitle + " ➔ " + entry.toTitle,
+        "O que está ocorrendo: " + entry.occurring + " | O que esperar: " + entry.expecting,
+        "Editar / Comentar",
+        function(){ openTaskPanel(taskId); }
+      );
+    }
+  }
+
+  /* --- Modal de Configuração da Mensagem Automática por Quadro --- */
+  var editingColAutoId = null;
+
+  function openColAutoModal(colId){
+    var col = getSortedTaskCols().find(function(c){ return c.id === colId; });
+    if(!col) return;
+    editingColAutoId = colId;
+    var texts = getColumnAutomationTexts(col);
+    document.getElementById('colAutoModalTitle').textContent = 'Quadro: ' + col.title;
+    document.getElementById('ca_occurring').value = texts.occurring;
+    document.getElementById('ca_expecting').value = texts.expecting;
+    document.getElementById('colAutoOverlay').hidden = false;
+    setTimeout(function(){ document.getElementById('ca_occurring').focus(); }, 20);
+  }
+
+  function closeColAutoModal(){
+    document.getElementById('colAutoOverlay').hidden = true;
+    editingColAutoId = null;
+  }
+
+  function saveColAutoModal(){
+    if(!editingColAutoId) return;
+    var occ = document.getElementById('ca_occurring').value.trim();
+    var exp = document.getElementById('ca_expecting').value.trim();
+    if(!occ){ document.getElementById('ca_occurring').focus(); return; }
+    if(!exp){ document.getElementById('ca_expecting').focus(); return; }
+
+    getStorage().collection('task_columns').doc(editingColAutoId).update({
+      autoOccurring: occ,
+      autoExpecting: exp
+    });
+    closeColAutoModal();
+    showToast("Regra de atualização automática salva!");
+  }
+
+  function resetColAutoModal(){
+    if(!editingColAutoId) return;
+    var col = getSortedTaskCols().find(function(c){ return c.id === editingColAutoId; });
+    if(!col) return;
+    var def = getDefaultColumnAutomation(col.title, !!col.isDone);
+    document.getElementById('ca_occurring').value = def.occurring;
+    document.getElementById('ca_expecting').value = def.expecting;
+  }
+
   /* --- Exportar & Importar Backup (.json) --- */
   var pendingBackupData = null;
 
   function exportBackup(){
     var payload = {
       app: "mesa-suporte",
-      version: 2,
+      version: 4,
       exportedAt: new Date().toISOString(),
       data: {
         tasks_oneoff: state.tasks || LocalStore.get('tasks_oneoff'),
@@ -482,24 +675,33 @@
     showToast("Backup restaurado com sucesso!");
   }
 
+  /* --- RENDERIZAÇÃO DAS BOXES (RESUMO) CORRIGIDAS --- */
   function renderSummary(){
     var el = document.getElementById('summary');
     if(!el) return;
-    var today = todayStr();
+    var today = todayStr(); // yyyy-mm-dd
     var tasks = state.tasks || [];
     var tickets = state.tickets || [];
-    var late = tasks.filter(function(t){ return !t.done && t.dueDate && t.dueDate < today; }).length;
-    var dueToday = tasks.filter(function(t){ return !t.done && t.dueDate === today; }).length;
+    
+    // Filtramos apenas as tarefas que NÃO estão em quadros de "Concluído"
+    var pendingTasks = tasks.filter(function(t){ return !t.done; });
+    
+    // Contagens de tempo
+    var late = pendingTasks.filter(function(t){ return t.dueDate && t.dueDate < today; }).length;
+    var dueToday = pendingTasks.filter(function(t){ return t.dueDate === today; }).length;
+    var onTime = pendingTasks.filter(function(t){ return !t.dueDate || t.dueDate > today; }).length;
+    
+    // Chamados e Implantações
     var openTickets = tickets.filter(function(t){ return t.status !== 'fechado'; }).length;
-    var toCollect = tickets.filter(function(t){ return t.status !== 'fechado' && t.nextFollowUp && t.nextFollowUp <= today; }).length;
     var impls = state.implantacoes || [];
     var implPend = impls.filter(function(i){ return i.status !== 'concluida' && (i.demandas||[]).some(function(d){ return !d.concluida; }); }).length;
+    
     el.innerHTML =
-      '<div class="stat'+(late?' alert':'')+'"><div class="n">'+late+'</div><div class="l">Tarefas atrasadas</div></div>' +
-      '<div class="stat"><div class="n">'+dueToday+'</div><div class="l">Vencem hoje</div></div>' +
-      '<div class="stat"><div class="n">'+openTickets+'</div><div class="l">Chamados em aberto</div></div>' +
-      '<div class="stat'+(toCollect?' alert':'')+'"><div class="n">'+toCollect+'</div><div class="l">Cobranças pendentes</div></div>' +
-      '<div class="stat'+(implPend?' alert':'')+'"><div class="n">'+implPend+'</div><div class="l">Implantações c/ pendência</div></div>';
+      '<div class="stat'+(late?' alert':'')+'"><div class="n">'+late+'</div><div class="l">Tarefas Atrasadas</div></div>' +
+      '<div class="stat"><div class="n">'+dueToday+'</div><div class="l">Vencem Hoje</div></div>' +
+      '<div class="stat"><div class="n">'+onTime+'</div><div class="l">Tarefas no Prazo</div></div>' +
+      '<div class="stat"><div class="n">'+openTickets+'</div><div class="l">Chamados Abertos</div></div>' +
+      '<div class="stat'+(implPend?' alert':'')+'"><div class="n">'+implPend+'</div><div class="l">Implantações Pendentes</div></div>';
   }
 
   function checkSvg(){ return '<svg viewBox="0 0 16 16" fill="none"><path d="M3 8.5L6.2 11.5L13 4.5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>'; }
@@ -523,10 +725,25 @@
     var validadoHtml = t.validado ? '<span class="tag validado-ok" title="'+(t.validadoEm ? 'Validado em '+fmtDate(t.validadoEm) : 'Validado')+'">✓ Validado p/ sistema</span>' : '';
     var completedHtml = (isDoneCol && t.completedAt) ? '<span class="tag opt-green">Concluído em ' + fmtDate(t.completedAt) + '</span>' : '';
 
+    var logs = Array.isArray(t.updatesLog) ? t.updatesLog : [];
+    var latest = logs.length ? logs[0] : null;
+    var latestHtml = '';
+    if(latest){
+      var routeText = latest.type === 'manual'
+        ? '💬 Comentário (' + esc(latest.timestamp || '') + ')'
+        : '⚡ ' + esc(latest.fromTitle || '') + ' ➔ ' + esc(latest.toTitle || '');
+      latestHtml = '<div class="card-latest-update" title="Clique no card para ver o histórico completo ('+logs.length+')">'+
+        '<div class="upd-route"><span>'+routeText+'</span><span>'+(logs.length > 1 ? '+'+(logs.length-1) : '')+'</span></div>'+
+        (latest.occurring ? '<div class="upd-line"><b>Ocorrendo:</b> '+esc(latest.occurring)+'</div>' : '')+
+        (latest.expecting ? '<div class="upd-line"><b>Esperar:</b> '+esc(latest.expecting)+'</div>' : '')+
+      '</div>';
+    }
+
     return '<div class="'+cls+'" data-id="'+t.id+'" draggable="true">'+
       '<div class="body">'+
         '<div class="title">'+esc(t.title)+'</div>'+
         (t.notes ? '<div class="excerpt">'+esc(t.notes)+'</div>' : '')+
+        latestHtml+
         '<div class="meta">'+
           '<span class="pri-dot c-'+esc(priColor)+'" title="Prioridade: '+esc(priOpt.label)+'"></span>'+
           validadoHtml+
@@ -540,6 +757,7 @@
     '</div>';
   }
 
+  /* --- ORDENAÇÃO E RENDERIZAÇÃO DOS CARDS --- */
   function renderTasks(){
     var el = document.getElementById('taskLanes');
     if(!el) return;
@@ -557,7 +775,26 @@
     var firstTodoCol = cols.find(function(c){ return !c.isDone; }) || cols[0];
     var firstDoneCol = cols.find(function(c){ return !!c.isDone; }) || cols[cols.length - 1];
 
-    tasks.forEach(function(t){
+    // ORDENAÇÃO: Data mais próxima primeiro. Empate: Prioridade Alta > Média > Baixa
+    var sortedTasks = tasks.slice().sort(function(a, b){
+      var dateA = a.dueDate || '9999-12-31'; // Sem data vai pro final
+      var dateB = b.dueDate || '9999-12-31';
+      
+      if(dateA < dateB) return -1;
+      if(dateA > dateB) return 1;
+      
+      // Datas iguais, verificar prioridade
+      var pWeight = { "alta": 3, "media": 2, "baixa": 1 };
+      var pA = pWeight[a.priority] || 0;
+      var pB = pWeight[b.priority] || 0;
+      
+      if(pA > pB) return -1;
+      if(pA < pB) return 1;
+      return 0;
+    });
+
+    // Distribui nas colunas
+    sortedTasks.forEach(function(t){
       var st = t.status;
       if(st && buckets[st]){
         buckets[st].push(t);
@@ -595,6 +832,7 @@
           '<span class="lane-title" data-act="editColTitle" data-id="'+esc(col.id)+'" title="Clique para renomear">'+esc(col.title)+'</span>'+
           '<span class="n">'+items.length+'</span>'+
           '<div class="lane-tools">'+
+            '<button class="lane-mini-btn auto-btn" data-act="configColAuto" data-id="'+esc(col.id)+'" title="Configurar atualização automática ao mover para este quadro">⚡</button>'+
             '<button class="lane-mini-btn'+(col.isDone?' is-done-col':'')+'" data-act="toggleColDone" data-id="'+esc(col.id)+'" title="'+(col.isDone?'Etapa de conclusão (clique para tornar etapa normal)':'Marcar este quadro como etapa de conclusão')+'">✓</button>'+
             (canMoveLeft ? '<button class="lane-mini-btn" data-act="moveColLeft" data-id="'+esc(col.id)+'" title="Mover para esquerda">‹</button>' : '')+
             (canMoveRight ? '<button class="lane-mini-btn" data-act="moveColRight" data-id="'+esc(col.id)+'" title="Mover para direita">›</button>' : '')+
@@ -613,7 +851,7 @@
       addBoxHtml += '<button class="add-lane-trigger" data-act="openAddCol">+ Adicionar outro quadro</button>';
     } else {
       addBoxHtml += '<div class="add-lane-form">'+
-        '<input type="text" id="newColTitleInput" placeholder="Nome do quadro (ex.: Validação / Homologação)">'+
+        '<input type="text" id="newColTitleInput" placeholder="Nome do quadro (ex.: Pendentes, Validação)">'+
         '<div class="color-picker-row">'+
           COL_COLORS.map(function(c){
             return '<button type="button" class="color-opt col-color-'+c+(newColColor===c?' selected':'')+'" data-act="pickNewColColor" data-color="'+c+'" title="Cor '+c+'"></button>';
@@ -639,8 +877,63 @@
     }
   }
 
-  /* --- Modal / Sub-aba de Edição e Validação do Card --- */
+  /* --- Modal / Sub-aba de Edição, Histórico e Validação do Card --- */
   var editingTaskId = null;
+  var draftUpdatesLog = [];
+
+  function renderTaskActivityFeed(){
+    var feedEl = document.getElementById('tk_activityFeed');
+    var countEl = document.getElementById('tk_activityCount');
+    if(!feedEl || !countEl) return;
+
+    countEl.textContent = draftUpdatesLog.length + (draftUpdatesLog.length === 1 ? ' registro' : ' registros');
+
+    if(draftUpdatesLog.length === 0){
+      feedEl.innerHTML = '<div class="activity-empty">Nenhuma atualização registrada ainda. Mova o card de quadro ou registre uma atualização acima.</div>';
+      return;
+    }
+
+    feedEl.innerHTML = draftUpdatesLog.map(function(item){
+      var isManual = item.type === 'manual';
+      var badgeText = isManual
+        ? '💬 Atualização manual'
+        : '⚡ ' + esc(item.fromTitle || '') + ' ➔ ' + esc(item.toTitle || '');
+
+      return '<div class="activity-item'+(isManual ? ' is-manual' : '')+'">'+
+        '<div class="activity-item-top">'+
+          '<span class="activity-badge">'+badgeText+'</span>'+
+          '<span class="activity-time">'+esc(item.timestamp || '')+'</span>'+
+          '<button type="button" class="activity-del-btn" data-del-log-id="'+esc(item.id)+'" title="Remover registro">✕</button>'+
+        '</div>'+
+        (item.occurring ? '<div class="activity-field"><strong>O que está ocorrendo:</strong> '+esc(item.occurring)+'</div>' : '')+
+        (item.expecting ? '<div class="activity-field"><strong>O que esperar:</strong> '+esc(item.expecting)+'</div>' : '')+
+      '</div>';
+    }).join('');
+  }
+
+  function addManualCommentToDraft(){
+    var occEl = document.getElementById('tk_newCommentStatus');
+    var expEl = document.getElementById('tk_newCommentNext');
+    var occ = occEl ? occEl.value.trim() : '';
+    var exp = expEl ? expEl.value.trim() : '';
+    if(!occ && !exp){
+      if(occEl) occEl.focus();
+      return;
+    }
+
+    draftUpdatesLog.unshift({
+      id: uid(),
+      type: "manual",
+      occurring: occ || null,
+      expecting: exp || null,
+      timestamp: nowDateTimeStr(),
+      createdAt: Date.now()
+    });
+
+    if(occEl) occEl.value = '';
+    if(expEl) expEl.value = '';
+    renderTaskActivityFeed();
+  }
 
   function syncValidationBadgeUI(){
     var chk = document.getElementById('tk_validado');
@@ -686,6 +979,11 @@
     document.getElementById('tk_completedAt').value = t ? (t.completedAt||'') : '';
     document.getElementById('tk_notes').value = t ? (t.notes||'') : '';
 
+    document.getElementById('tk_newCommentStatus').value = '';
+    document.getElementById('tk_newCommentNext').value = '';
+    draftUpdatesLog = (t && Array.isArray(t.updatesLog)) ? t.updatesLog.slice() : [];
+    renderTaskActivityFeed();
+
     document.getElementById('tk_validado').checked = !!(t && t.validado);
     document.getElementById('tk_validadoPor').value = t ? (t.validadoPor||'') : '';
     document.getElementById('tk_validacaoObs').value = t ? (t.validacaoObs||'') : '';
@@ -701,6 +999,7 @@
   function closeTaskPanel(){
     document.getElementById('taskOverlay').hidden = true;
     editingTaskId = null;
+    draftUpdatesLog = [];
   }
 
   function showTaskValidationError(text){
@@ -717,6 +1016,20 @@
       showTaskValidationError('Informe o título da tarefa antes de salvar.');
       titleEl.focus();
       return;
+    }
+
+    // Se o usuário digitou algo no compositor rápido e clicou direto em Salvar, inclui automaticamente
+    var pendingOcc = document.getElementById('tk_newCommentStatus').value.trim();
+    var pendingExp = document.getElementById('tk_newCommentNext').value.trim();
+    if(pendingOcc || pendingExp){
+      draftUpdatesLog.unshift({
+        id: uid(),
+        type: "manual",
+        occurring: pendingOcc || null,
+        expecting: pendingExp || null,
+        timestamp: nowDateTimeStr(),
+        createdAt: Date.now()
+      });
     }
 
     var empresa = document.getElementById('tk_empresa').value.trim() || null;
@@ -737,9 +1050,21 @@
       return;
     }
 
-    var targetCol = getSortedTaskCols().find(function(c){ return c.id === status; });
+    var cols = getSortedTaskCols();
+    var targetCol = cols.find(function(c){ return c.id === status; });
     var isDoneCol = !!(targetCol && targetCol.isDone);
     var existing = editingTaskId ? (state.tasks||[]).find(function(x){ return x.id === editingTaskId; }) : null;
+
+    // Se mudou de quadro pelo seletor dentro do modal, registra também a transição automática
+    var generatedEntry = null;
+    if(existing && existing.status !== status && targetCol){
+      var fromCol = cols.find(function(c){ return c.id === existing.status; });
+      generatedEntry = buildTransitionLogEntry(fromCol, targetCol);
+      draftUpdatesLog.unshift(generatedEntry);
+    } else if(!existing && targetCol){
+      generatedEntry = buildTransitionLogEntry(null, targetCol);
+      draftUpdatesLog.unshift(generatedEntry);
+    }
 
     var data = {
       title: title,
@@ -750,6 +1075,7 @@
       priority: priority,
       dueDate: dueDate,
       notes: notes,
+      updatesLog: draftUpdatesLog,
       done: isDoneCol,
       completedAt: isDoneCol ? (completedAtInput || (existing && existing.completedAt) || todayStr()) : null,
       validado: validado,
@@ -767,6 +1093,13 @@
     }
 
     closeTaskPanel();
+
+    if(generatedEntry && existing){
+      showToast(
+        generatedEntry.fromTitle + " ➔ " + generatedEntry.toTitle,
+        "O que está ocorrendo: " + generatedEntry.occurring + " | O que esperar: " + generatedEntry.expecting
+      );
+    }
   }
 
   function saveInlineCard(colId){
@@ -780,6 +1113,7 @@
     }
     var targetCol = getSortedTaskCols().find(function(c){ return c.id === colId; });
     var isDoneCol = !!(targetCol && targetCol.isDone);
+    var initialLog = targetCol ? [buildTransitionLogEntry(null, targetCol)] : [];
 
     inlineCardColId = null;
     getStorage().collection('tasks_oneoff').doc(uid()).set({
@@ -790,6 +1124,7 @@
       empresa: null,
       codigo: null,
       notes: null,
+      updatesLog: initialLog,
       status: colId,
       done: isDoneCol,
       completedAt: isDoneCol ? todayStr() : null,
@@ -809,13 +1144,16 @@
     var isDone = !!(document.getElementById('newColDoneCheck') && document.getElementById('newColDoneCheck').checked);
     var cols = getSortedTaskCols();
     var maxOrder = cols.reduce(function(max, c){ return Math.max(max, c.order || 0); }, -1);
+    var autoTexts = getDefaultColumnAutomation(title, isDone);
 
     addingColOpen = false;
     getStorage().collection('task_columns').doc(uid()).set({
       title: title,
       color: newColColor,
       isDone: isDone,
-      order: maxOrder + 1
+      order: maxOrder + 1,
+      autoOccurring: autoTexts.occurring,
+      autoExpecting: autoTexts.expecting
     });
     newColColor = "blue";
   }
@@ -1143,6 +1481,24 @@
       if(e.target.id === 'backupOverlay') closeBackupModal();
     });
 
+    // Eventos do Modal de Automação de Quadro
+    var colAutoCloseXBtn = document.getElementById('colAutoCloseXBtn');
+    if(colAutoCloseXBtn) colAutoCloseXBtn.addEventListener('click', closeColAutoModal);
+
+    var colAutoCancelBtn = document.getElementById('colAutoCancelBtn');
+    if(colAutoCancelBtn) colAutoCancelBtn.addEventListener('click', closeColAutoModal);
+
+    var colAutoSaveBtn = document.getElementById('colAutoSaveBtn');
+    if(colAutoSaveBtn) colAutoSaveBtn.addEventListener('click', saveColAutoModal);
+
+    var colAutoResetBtn = document.getElementById('colAutoResetBtn');
+    if(colAutoResetBtn) colAutoResetBtn.addEventListener('click', resetColAutoModal);
+
+    var colAutoOverlay = document.getElementById('colAutoOverlay');
+    if(colAutoOverlay) colAutoOverlay.addEventListener('click', function(e){
+      if(e.target.id === 'colAutoOverlay') closeColAutoModal();
+    });
+
     // Eventos do Modal de Cadastro de Nova Opção (+)
     var optCloseXBtn = document.getElementById('optionCloseXBtn');
     if(optCloseXBtn) optCloseXBtn.addEventListener('click', closeOptionModal);
@@ -1163,7 +1519,20 @@
       if(e.target.id === 'optionOverlay') closeOptionModal();
     });
 
+    // Adicionar comentário manual dentro do modal do card
+    var addCommentBtn = document.getElementById('tk_addCommentBtn');
+    if(addCommentBtn) addCommentBtn.addEventListener('click', addManualCommentToDraft);
+
     document.addEventListener('click', function(e){
+      // Remover item do histórico no modal do card
+      var delLogBtn = e.target.closest('[data-del-log-id]');
+      if(delLogBtn){
+        var logId = delLogBtn.dataset.delLogId;
+        draftUpdatesLog = draftUpdatesLog.filter(function(item){ return item.id !== logId; });
+        renderTaskActivityFeed();
+        return;
+      }
+
       // Botão "+" ao lado de qualquer select
       var addOptBtn = e.target.closest('[data-add-opt]');
       if(addOptBtn){
@@ -1193,6 +1562,8 @@
         if(act === 'delTask'){
           e.stopPropagation();
           getStorage().collection('tasks_oneoff').doc(id).delete();
+        } else if(act === 'configColAuto'){
+          openColAutoModal(id);
         } else if(act === 'openInlineCard'){
           inlineCardColId = b.dataset.col;
           addingColOpen = false;
@@ -1314,7 +1685,7 @@
       getStorage().collection('tickets').doc(el.dataset.id).update({ notes: el.value.trim() });
     }, true);
 
-    // --- Drag & Drop (Estilo Trello) para os cards de Tarefas ---
+    // --- Drag & Drop (Estilo Trello) com Geração Automática de Atualização ---
     var draggingTask = null;
 
     document.addEventListener('dragstart', function(e){
@@ -1384,18 +1755,7 @@
           var id = (draggingTask && draggingTask.dataset.id) || e.dataTransfer.getData('text/plain');
           var lane = laneBody.closest('.task-lane');
           if(lane && id){
-            var newStatus = lane.dataset.st;
-            var targetCol = getSortedTaskCols().find(function(c){ return c.id === newStatus; });
-            var isDoneCol = !!(targetCol && targetCol.isDone);
-            var upd = { status: newStatus };
-            if(isDoneCol){
-              upd.done = true;
-              upd.completedAt = todayStr();
-            } else {
-              upd.done = false;
-              upd.completedAt = null;
-            }
-            getStorage().collection('tasks_oneoff').doc(id).update(upd);
+            moveTaskToColumn(id, lane.dataset.st, false);
           }
         }
       });
@@ -1432,6 +1792,8 @@
 
     document.addEventListener('keydown', function(e){
       if(e.key === 'Escape'){
+        var caOv = document.getElementById('colAutoOverlay');
+        if(caOv && !caOv.hidden){ closeColAutoModal(); return; }
         var optOv = document.getElementById('optionOverlay');
         if(optOv && !optOv.hidden){ closeOptionModal(); return; }
         var ov = document.getElementById('taskOverlay');
