@@ -46,6 +46,38 @@
     ticket_assignees:{ title: "Novo Responsável", label: "Nome do responsável *", placeholder: "Ex.: Carlos Silva…", selectId: "t_assignee", hasColor: false }
   };
 
+  var SUMMARY_METRIC_OPTIONS = [
+    { id: "completed_all",   label: "Automático: Cards Concluídos (Todos)" },
+    { id: "completed_today", label: "Automático: Cards Concluídos (Hoje)" },
+    { id: "completed_month", label: "Automático: Cards Concluídos (Este mês)" },
+    { id: "validated",       label: "Automático: Validados p/ Sistema" },
+    { id: "total_tasks",     label: "Automático: Total de Cards no Quadro" },
+    { id: "late",            label: "Automático: Tarefas Atrasadas" },
+    { id: "due_today",       label: "Automático: Vencem Hoje" },
+    { id: "on_time",         label: "Automático: Tarefas no Prazo" },
+    { id: "open_tickets",    label: "Automático: Chamados Abertos" },
+    { id: "falhas_abertas",  label: "Automático: Falhas em Aberto" },
+    { id: "impl_pend",       label: "Automático: Implantações Pendentes" },
+    { id: "manual",          label: "Manual: Digitar valor personalizado" }
+  ];
+
+  var SUMMARY_ACCENT_OPTIONS = [
+    { id: "green",   label: "Verde (Concluído)" },
+    { id: "blue",    label: "Azul (Destaque)" },
+    { id: "amber",   label: "Âmbar (Atenção)" },
+    { id: "red",     label: "Vermelho (Alerta)" },
+    { id: "default", label: "Neutro" }
+  ];
+
+  var DEFAULT_SUMMARY_CARDS = [
+    { id: "completed",   label: "Cards Concluídos",        sub: "Total finalizado", visible: true, metric: "completed_all", manualValue: "0", accent: "green" },
+    { id: "late",        label: "Tarefas Atrasadas",       sub: "",                 visible: true, metric: "late",          manualValue: "0", accent: "red" },
+    { id: "dueToday",    label: "Vencem Hoje",             sub: "",                 visible: true, metric: "due_today",     manualValue: "0", accent: "amber" },
+    { id: "onTime",      label: "Tarefas no Prazo",        sub: "",                 visible: true, metric: "on_time",       manualValue: "0", accent: "blue" },
+    { id: "openTickets", label: "Chamados Abertos",        sub: "",                 visible: true, metric: "open_tickets",  manualValue: "0", accent: "default" },
+    { id: "implPend",    label: "Implantações Pendentes",  sub: "",                 visible: true, metric: "impl_pend",     manualValue: "0", accent: "red" }
+  ];
+
   var COL_COLORS = ["blue", "amber", "purple", "green", "red", "slate"];
   var DEFAULT_TASK_COLS = [
     {
@@ -137,7 +169,7 @@
   }
   function fmtDate(s){
     if(!s) return "";
-    var p = s.split("-"); 
+    var p = s.split("-");
     if(p.length!==3) return s;
     return p[2]+"/"+p[1];
   }
@@ -171,7 +203,7 @@
     toastTimer = setTimeout(function(){ el.hidden = true; }, subMsg ? 5500 : 3200);
   }
 
-  var state = { tasks: null, taskColumns: null, tickets: null, implantacoes: null, customOptions: null, canEdit: true };
+  var state = { tasks: null, taskColumns: null, tickets: null, implantacoes: null, customOptions: null, summaryConfig: null, canEdit: true };
   var addingColOpen = false;
   var newColColor = "blue";
   var seedingCols = false;
@@ -195,6 +227,230 @@
       catch(e) {}
     }
   };
+
+  /* --- Configuração & Cálculo dos Indicadores Superiores --- */
+  function cloneDefaultSummaryCards(){
+    return DEFAULT_SUMMARY_CARDS.map(function(c){ return Object.assign({}, c); });
+  }
+
+  function getSummaryCardsConfig(){
+    if(Array.isArray(state.summaryConfig) && state.summaryConfig.length){
+      return state.summaryConfig;
+    }
+    return cloneDefaultSummaryCards();
+  }
+
+  function computeSummaryMetricValue(metric){
+    var today = todayStr();
+    var monthPrefix = today.slice(0, 7);
+    var tasks = state.tasks || [];
+    var tickets = state.tickets || [];
+    var impls = state.implantacoes || [];
+    var pendingTasks = tasks.filter(function(t){ return !t.done; });
+
+    switch(metric){
+      case "completed_all":
+        return tasks.filter(function(t){ return !!t.done; }).length;
+      case "completed_today":
+        return tasks.filter(function(t){ return !!t.done && t.completedAt === today; }).length;
+      case "completed_month":
+        return tasks.filter(function(t){ return !!t.done && t.completedAt && t.completedAt.slice(0, 7) === monthPrefix; }).length;
+      case "validated":
+        return tasks.filter(function(t){ return !!t.validado; }).length;
+      case "total_tasks":
+        return tasks.length;
+      case "late":
+        return pendingTasks.filter(function(t){ return t.dueDate && t.dueDate < today; }).length;
+      case "due_today":
+        return pendingTasks.filter(function(t){ return t.dueDate === today; }).length;
+      case "on_time":
+        return pendingTasks.filter(function(t){ return !t.dueDate || t.dueDate > today; }).length;
+      case "open_tickets":
+        return tickets.filter(function(t){ return t.status !== 'fechado'; }).length;
+      case "falhas_abertas":
+        return tickets.filter(function(t){ return t.tipo === 'falha' && t.status !== 'fechado'; }).length;
+      case "impl_pend":
+        return impls.filter(function(i){ return i.status !== 'concluida' && (i.demandas||[]).some(function(d){ return !d.concluida; }); }).length;
+      default:
+        return 0;
+    }
+  }
+
+  function renderSummary(){
+    var el = document.getElementById('summary');
+    if(!el) return;
+    var cards = getSummaryCardsConfig().filter(function(c){ return c.visible !== false; });
+
+    if(cards.length === 0){
+      el.innerHTML = '<div class="stat" data-stat-id="">'+
+        '<span class="stat-edit-badge">✎ Editar</span>'+
+        '<div class="n">—</div>'+
+        '<div class="l">Nenhum indicador visível</div>'+
+        '<div class="sub-note">Clique aqui ou em "Personalizar indicadores" para ativar.</div>'+
+      '</div>';
+      return;
+    }
+
+    el.innerHTML = cards.map(function(c){
+      var isManual = (c.metric === 'manual');
+      var val = isManual
+        ? (c.manualValue != null && String(c.manualValue).trim() !== '' ? String(c.manualValue) : '0')
+        : computeSummaryMetricValue(c.metric);
+      var numVal = typeof val === 'number' ? val : parseFloat(String(val).replace(',', '.'));
+      var accent = c.accent || 'default';
+
+      var cls = 'stat';
+      if(accent === 'red'){
+        if(isManual || numVal > 0) cls += ' alert';
+      } else if(accent === 'green'){
+        cls += ' tone-green';
+      } else if(accent === 'blue'){
+        cls += ' tone-blue';
+      } else if(accent === 'amber'){
+        if(isManual || numVal > 0) cls += ' tone-amber';
+      }
+
+      return '<div class="'+cls+'" data-stat-id="'+esc(c.id)+'" title="Clique para editar este card ou alterar os dados">'+
+        '<span class="stat-edit-badge">✎ Editar</span>'+
+        '<div class="n">'+esc(val)+'</div>'+
+        '<div class="l">'+esc(c.label || 'Indicador')+'</div>'+
+        (c.sub ? '<div class="sub-note">'+esc(c.sub)+'</div>' : '')+
+      '</div>';
+    }).join('');
+  }
+
+  /* --- Modal de Personalização dos Cards Superiores --- */
+  var draftSummaryCards = [];
+  var focusSummaryCardId = null;
+
+  function renderSummaryConfigModalList(){
+    var listEl = document.getElementById('scConfigList');
+    if(!listEl) return;
+
+    listEl.innerHTML = draftSummaryCards.map(function(card, idx){
+      var isManual = (card.metric === 'manual');
+      var autoCurrentVal = isManual ? (card.manualValue || '0') : computeSummaryMetricValue(card.metric);
+      var isFocused = (focusSummaryCardId && focusSummaryCardId === card.id);
+      var canDelete = draftSummaryCards.length > 1;
+
+      var metricOptionsHtml = SUMMARY_METRIC_OPTIONS.map(function(m){
+        return '<option value="'+esc(m.id)+'"'+(card.metric === m.id ? ' selected' : '')+'>'+esc(m.label)+'</option>';
+      }).join('');
+
+      var accentOptionsHtml = SUMMARY_ACCENT_OPTIONS.map(function(a){
+        return '<option value="'+esc(a.id)+'"'+(card.accent === a.id ? ' selected' : '')+'>'+esc(a.label)+'</option>';
+      }).join('');
+
+      return '<div class="sc-item-card'+(isFocused ? ' is-focused' : '')+(card.visible === false ? ' is-disabled' : '')+'" data-cfg-idx="'+idx+'" data-cfg-id="'+esc(card.id)+'">'+
+        '<div class="sc-item-top">'+
+          '<label class="sc-toggle-label">'+
+            '<input type="checkbox" data-scfg="visible" data-idx="'+idx+'"'+(card.visible !== false ? ' checked' : '')+'>'+
+            '<span>Exibir no painel superior</span>'+
+          '</label>'+
+          '<div class="sc-item-tools">'+
+            (idx > 0 ? '<button type="button" class="lane-mini-btn" data-scfg-act="up" data-idx="'+idx+'" title="Mover para cima">↑</button>' : '')+
+            (idx < draftSummaryCards.length - 1 ? '<button type="button" class="lane-mini-btn" data-scfg-act="down" data-idx="'+idx+'" title="Mover para baixo">↓</button>' : '')+
+            (canDelete ? '<button type="button" class="lane-mini-btn del" data-scfg-act="del" data-idx="'+idx+'" title="Remover card">✕</button>' : '')+
+          '</div>'+
+        '</div>'+
+        '<div class="sc-grid-fields">'+
+          '<label>Título do card *'+
+            '<input type="text" data-scfg="label" data-idx="'+idx+'" value="'+esc(card.label || '')+'" placeholder="Ex.: Cards Concluídos">'+
+          '</label>'+
+          '<label>Fonte dos dados'+
+            '<select data-scfg="metric" data-idx="'+idx+'">'+metricOptionsHtml+'</select>'+
+          '</label>'+
+          '<label>'+(isManual ? 'Valor (Editável) *' : 'Valor atual')+
+            '<input type="text" data-scfg="manualValue" data-idx="'+idx+'" value="'+esc(isManual ? (card.manualValue || '0') : autoCurrentVal)+'"'+(isManual ? ' placeholder="Digite…"' : ' disabled')+'>'+
+          '</label>'+
+        '</div>'+
+        '<div class="sc-grid-sub">'+
+          '<label>Subtítulo / Observação'+
+            '<input type="text" data-scfg="sub" data-idx="'+idx+'" value="'+esc(card.sub || '')+'" placeholder="Ex.: Meta: 20 no mês">'+
+          '</label>'+
+          '<label>Cor de destaque'+
+            '<select data-scfg="accent" data-idx="'+idx+'">'+accentOptionsHtml+'</select>'+
+          '</label>'+
+        '</div>'+
+      '</div>';
+    }).join('');
+  }
+
+  function openSummaryModal(cardId){
+    focusSummaryCardId = cardId || null;
+    draftSummaryCards = getSummaryCardsConfig().map(function(c){ return Object.assign({}, c); });
+    renderSummaryConfigModalList();
+    var ov = document.getElementById('summaryConfigOverlay');
+    if(ov) ov.hidden = false;
+
+    if(cardId){
+      setTimeout(function(){
+        var targetCard = document.querySelector('.sc-item-card[data-cfg-id="'+cardId+'"]');
+        if(targetCard){
+          targetCard.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          var inp = targetCard.querySelector('input[data-scfg="label"]');
+          if(inp){ inp.focus(); inp.select(); }
+        }
+      }, 30);
+    }
+  }
+
+  function closeSummaryModal(){
+    var ov = document.getElementById('summaryConfigOverlay');
+    if(ov) ov.hidden = true;
+    draftSummaryCards = [];
+    focusSummaryCardId = null;
+  }
+
+  function saveSummaryModal(){
+    var cleaned = draftSummaryCards.map(function(c, i){
+      var lbl = (c.label || '').trim() || ('Indicador ' + (i + 1));
+      return {
+        id: c.id || uid(),
+        label: lbl,
+        sub: (c.sub || '').trim(),
+        visible: c.visible !== false,
+        metric: c.metric || 'completed_all',
+        manualValue: (c.manualValue != null && String(c.manualValue).trim() !== '') ? String(c.manualValue).trim() : '0',
+        accent: c.accent || 'default'
+      };
+    });
+
+    state.summaryConfig = cleaned;
+    LocalStore.set('summary_config', cleaned);
+    closeSummaryModal();
+    renderSummary();
+    showToast('Painel superior atualizado!');
+  }
+
+  function addNewSummaryCardDraft(){
+    var newCard = {
+      id: uid(),
+      label: 'Novo Indicador',
+      sub: 'Editado manualmente',
+      visible: true,
+      metric: 'manual',
+      manualValue: '0',
+      accent: 'blue'
+    };
+    draftSummaryCards.push(newCard);
+    focusSummaryCardId = newCard.id;
+    renderSummaryConfigModalList();
+    setTimeout(function(){
+      var target = document.querySelector('.sc-item-card[data-cfg-id="'+newCard.id+'"]');
+      if(target){
+        target.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        var inp = target.querySelector('input[data-scfg="label"]');
+        if(inp){ inp.focus(); inp.select(); }
+      }
+    }, 30);
+  }
+
+  function resetSummaryModal(){
+    draftSummaryCards = cloneDefaultSummaryCards();
+    focusSummaryCardId = null;
+    renderSummaryConfigModalList();
+  }
 
   /* --- Gerenciamento de Opções Dinâmicas dos Select Boxes --- */
   function getOptionsList(group){
@@ -595,14 +851,15 @@
   function exportBackup(){
     var payload = {
       app: "mesa-suporte",
-      version: 4,
+      version: 5,
       exportedAt: new Date().toISOString(),
       data: {
         tasks_oneoff: state.tasks || LocalStore.get('tasks_oneoff'),
         task_columns: state.taskColumns || LocalStore.get('task_columns'),
         tickets: state.tickets || LocalStore.get('tickets'),
         implantacoes: state.implantacoes || LocalStore.get('implantacoes'),
-        custom_options: state.customOptions || LocalStore.getObj('custom_options')
+        custom_options: state.customOptions || LocalStore.getObj('custom_options'),
+        summary_config: state.summaryConfig || LocalStore.get('summary_config')
       }
     };
 
@@ -638,7 +895,8 @@
           task_columns: Array.isArray(data.task_columns) && data.task_columns.length ? data.task_columns : DEFAULT_TASK_COLS,
           tickets: Array.isArray(data.tickets) ? data.tickets : [],
           implantacoes: Array.isArray(data.implantacoes) ? data.implantacoes : [],
-          custom_options: (data.custom_options && typeof data.custom_options === 'object') ? data.custom_options : {}
+          custom_options: (data.custom_options && typeof data.custom_options === 'object') ? data.custom_options : {},
+          summary_config: Array.isArray(data.summary_config) && data.summary_config.length ? data.summary_config : cloneDefaultSummaryCards()
         };
 
         var dateLabel = parsed.exportedAt
@@ -671,44 +929,20 @@
     LocalStore.set('tickets', pendingBackupData.tickets);
     LocalStore.set('implantacoes', pendingBackupData.implantacoes);
     LocalStore.setObj('custom_options', pendingBackupData.custom_options);
+    LocalStore.set('summary_config', pendingBackupData.summary_config);
 
     state.tasks = pendingBackupData.tasks_oneoff;
     state.taskColumns = pendingBackupData.task_columns;
     state.tickets = pendingBackupData.tickets;
     state.implantacoes = pendingBackupData.implantacoes;
     state.customOptions = pendingBackupData.custom_options;
+    state.summaryConfig = pendingBackupData.summary_config;
 
     refreshAllSelects();
     normalizeTasksAndColumns();
     closeBackupModal();
     renderAll();
     showToast("Backup restaurado com sucesso!");
-  }
-
-  /* --- RENDERIZAÇÃO DAS BOXES (RESUMO) --- */
-  function renderSummary(){
-    var el = document.getElementById('summary');
-    if(!el) return;
-    var today = todayStr();
-    var tasks = state.tasks || [];
-    var tickets = state.tickets || [];
-    
-    var pendingTasks = tasks.filter(function(t){ return !t.done; });
-    
-    var late = pendingTasks.filter(function(t){ return t.dueDate && t.dueDate < today; }).length;
-    var dueToday = pendingTasks.filter(function(t){ return t.dueDate === today; }).length;
-    var onTime = pendingTasks.filter(function(t){ return !t.dueDate || t.dueDate > today; }).length;
-    
-    var openTickets = tickets.filter(function(t){ return t.status !== 'fechado'; }).length;
-    var impls = state.implantacoes || [];
-    var implPend = impls.filter(function(i){ return i.status !== 'concluida' && (i.demandas||[]).some(function(d){ return !d.concluida; }); }).length;
-    
-    el.innerHTML =
-      '<div class="stat'+(late?' alert':'')+'"><div class="n">'+late+'</div><div class="l">Tarefas Atrasadas</div></div>' +
-      '<div class="stat"><div class="n">'+dueToday+'</div><div class="l">Vencem Hoje</div></div>' +
-      '<div class="stat"><div class="n">'+onTime+'</div><div class="l">Tarefas no Prazo</div></div>' +
-      '<div class="stat"><div class="n">'+openTickets+'</div><div class="l">Chamados Abertos</div></div>' +
-      '<div class="stat'+(implPend?' alert':'')+'"><div class="n">'+implPend+'</div><div class="l">Implantações Pendentes</div></div>';
   }
 
   function checkSvg(){ return '<svg viewBox="0 0 16 16" fill="none"><path d="M3 8.5L6.2 11.5L13 4.5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>'; }
@@ -789,14 +1023,14 @@
     var sortedTasks = tasks.slice().sort(function(a, b){
       var dateA = a.dueDate || '9999-12-31';
       var dateB = b.dueDate || '9999-12-31';
-      
+
       if(dateA < dateB) return -1;
       if(dateA > dateB) return 1;
-      
+
       var pWeight = { "alta": 3, "media": 2, "baixa": 1 };
       var pA = pWeight[a.priority] || 0;
       var pB = pWeight[b.priority] || 0;
-      
+
       if(pA > pB) return -1;
       if(pA < pB) return 1;
       return 0;
@@ -1483,6 +1717,96 @@
   function setupEvents(){
     var isDraggingCard = false;
 
+    // Eventos do Painel Superior Personalizável
+    var openSummaryConfigBtn = document.getElementById('openSummaryConfigBtn');
+    if(openSummaryConfigBtn) openSummaryConfigBtn.addEventListener('click', function(){ openSummaryModal(null); });
+
+    var scCloseXBtn = document.getElementById('scCloseXBtn');
+    if(scCloseXBtn) scCloseXBtn.addEventListener('click', closeSummaryModal);
+
+    var scCancelBtn = document.getElementById('scCancelBtn');
+    if(scCancelBtn) scCancelBtn.addEventListener('click', closeSummaryModal);
+
+    var scSaveBtn = document.getElementById('scSaveBtn');
+    if(scSaveBtn) scSaveBtn.addEventListener('click', saveSummaryModal);
+
+    var scResetBtn = document.getElementById('scResetBtn');
+    if(scResetBtn) scResetBtn.addEventListener('click', resetSummaryModal);
+
+    var scAddCardBtn = document.getElementById('scAddCardBtn');
+    if(scAddCardBtn) scAddCardBtn.addEventListener('click', addNewSummaryCardDraft);
+
+    var summaryConfigOverlay = document.getElementById('summaryConfigOverlay');
+    if(summaryConfigOverlay) summaryConfigOverlay.addEventListener('click', function(e){
+      if(e.target.id === 'summaryConfigOverlay') closeSummaryModal();
+    });
+
+    var scConfigList = document.getElementById('scConfigList');
+    if(scConfigList){
+      scConfigList.addEventListener('input', function(e){
+        var el = e.target.closest('[data-scfg]');
+        if(!el) return;
+        var idx = parseInt(el.dataset.idx, 10);
+        var field = el.dataset.scfg;
+        if(isNaN(idx) || !draftSummaryCards[idx]) return;
+        if(field === 'label' || field === 'sub' || field === 'manualValue'){
+          draftSummaryCards[idx][field] = el.value;
+        }
+      });
+
+      scConfigList.addEventListener('change', function(e){
+        var el = e.target.closest('[data-scfg]');
+        if(!el) return;
+        var idx = parseInt(el.dataset.idx, 10);
+        var field = el.dataset.scfg;
+        if(isNaN(idx) || !draftSummaryCards[idx]) return;
+
+        if(field === 'visible'){
+          draftSummaryCards[idx].visible = !!el.checked;
+          renderSummaryConfigModalList();
+        } else if(field === 'metric'){
+          var prevMetric = draftSummaryCards[idx].metric;
+          var newMetric = el.value;
+          if(newMetric === 'manual' && prevMetric !== 'manual'){
+            draftSummaryCards[idx].manualValue = String(computeSummaryMetricValue(prevMetric));
+          }
+          draftSummaryCards[idx].metric = newMetric;
+          renderSummaryConfigModalList();
+          if(newMetric === 'manual'){
+            setTimeout(function(){
+              var valInp = scConfigList.querySelector('input[data-scfg="manualValue"][data-idx="'+idx+'"]');
+              if(valInp){ valInp.focus(); valInp.select(); }
+            }, 20);
+          }
+        } else if(field === 'accent'){
+          draftSummaryCards[idx].accent = el.value;
+        }
+      });
+
+      scConfigList.addEventListener('click', function(e){
+        var btn = e.target.closest('[data-scfg-act]');
+        if(!btn) return;
+        var idx = parseInt(btn.dataset.idx, 10);
+        var act = btn.dataset.scfgAct;
+        if(isNaN(idx) || !draftSummaryCards[idx]) return;
+
+        if(act === 'up' && idx > 0){
+          var tmpUp = draftSummaryCards[idx];
+          draftSummaryCards[idx] = draftSummaryCards[idx - 1];
+          draftSummaryCards[idx - 1] = tmpUp;
+          renderSummaryConfigModalList();
+        } else if(act === 'down' && idx < draftSummaryCards.length - 1){
+          var tmpDown = draftSummaryCards[idx];
+          draftSummaryCards[idx] = draftSummaryCards[idx + 1];
+          draftSummaryCards[idx + 1] = tmpDown;
+          renderSummaryConfigModalList();
+        } else if(act === 'del' && draftSummaryCards.length > 1){
+          draftSummaryCards.splice(idx, 1);
+          renderSummaryConfigModalList();
+        }
+      });
+    }
+
     // Botões de Backup
     var exportBtn = document.getElementById('exportBackupBtn');
     if(exportBtn) exportBtn.addEventListener('click', exportBackup);
@@ -1556,6 +1880,13 @@
     if(addCommentBtn) addCommentBtn.addEventListener('click', addManualCommentToDraft);
 
     document.addEventListener('click', function(e){
+      // Editar card do painel superior ao clicar no próprio card
+      var statCard = e.target.closest('.stat[data-stat-id]');
+      if(statCard){
+        openSummaryModal(statCard.dataset.statId || null);
+        return;
+      }
+
       // Remover item do histórico no modal do card
       var delLogBtn = e.target.closest('[data-del-log-id]');
       if(delLogBtn){
@@ -1840,6 +2171,8 @@
 
     document.addEventListener('keydown', function(e){
       if(e.key === 'Escape'){
+        var sumOv = document.getElementById('summaryConfigOverlay');
+        if(sumOv && !sumOv.hidden){ closeSummaryModal(); return; }
         var caOv = document.getElementById('colAutoOverlay');
         if(caOv && !caOv.hidden){ closeColAutoModal(); return; }
         var optOv = document.getElementById('optionOverlay');
@@ -1889,6 +2222,8 @@
 
   function start(){
     state.customOptions = LocalStore.getObj('custom_options');
+    var savedSummary = LocalStore.get('summary_config');
+    state.summaryConfig = (Array.isArray(savedSummary) && savedSummary.length) ? savedSummary : cloneDefaultSummaryCards();
     setupEvents();
     state.tasks = LocalStore.get('tasks_oneoff');
     state.taskColumns = LocalStore.get('task_columns');

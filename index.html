@@ -33,8 +33,14 @@
     </div>
   </header>
 
-  <!-- Caixas de Resumo com as novas métricas -->
-  <div class="summary" id="summary"></div>
+  <!-- Caixas de Resumo Personalizáveis -->
+  <div class="summary-bar-wrap">
+    <div class="summary-toolbar">
+      <span class="summary-toolbar-label">Indicadores do Painel</span>
+      <button type="button" class="btn ghost small" id="openSummaryConfigBtn" title="Escolher quais cards aparecem, editar nomes ou alterar dados">⚙ Personalizar indicadores</button>
+    </div>
+    <div class="summary" id="summary"></div>
+  </div>
 
   <section class="view" id="view-tarefas">
     <div class="board-head">
@@ -68,6 +74,38 @@
   </section>
 
   <footer class="hint" id="hint">Carregando seus dados…</footer>
+</div>
+
+<!-- Modal de Personalização dos Cards do Resumo (Topo) -->
+<div class="modal-overlay" id="summaryConfigOverlay" hidden style="z-index:40">
+  <div class="task-modal" style="max-width:740px">
+    <div class="task-modal-head">
+      <div>
+        <span class="modal-kicker">Painel Superior</span>
+        <h3>Personalizar Cards de Resumo</h3>
+      </div>
+      <button type="button" class="icon-btn" id="scCloseXBtn" title="Fechar">✕</button>
+    </div>
+
+    <div class="task-modal-body">
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap">
+        <p style="margin:0;font-size:12.5px;color:var(--fg-muted)">
+          Ative ou oculte cards, edite os rótulos, troque o cálculo automático ou defina um valor manual.
+        </p>
+        <button type="button" class="btn ghost small" id="scAddCardBtn">+ Adicionar card</button>
+      </div>
+
+      <div class="sc-list" id="scConfigList"></div>
+    </div>
+
+    <div class="task-modal-foot">
+      <button type="button" class="btn ghost" id="scResetBtn">Restaurar padrão</button>
+      <div style="margin-left:auto;display:flex;gap:10px">
+        <button type="button" class="btn ghost" id="scCancelBtn">Cancelar</button>
+        <button type="button" class="btn" id="scSaveBtn">Salvar painel</button>
+      </div>
+    </div>
+  </div>
 </div>
 
 <!-- Modal / Sub-aba de Edição, Histórico e Validação do Card -->
