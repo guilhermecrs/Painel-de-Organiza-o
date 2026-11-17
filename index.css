@@ -978,6 +978,27 @@ section.view {
 
 .task-card .actions { display: flex; gap: 2px; flex: none; }
 
+.card-done-btn {
+  align-self: flex-start;
+  margin-top: 2px;
+  border: 1px solid color-mix(in srgb, var(--st-fechado) 40%, var(--border));
+  background: var(--st-fechado-soft);
+  color: var(--st-fechado);
+  font-family: var(--font-display);
+  font-size: 11px;
+  font-weight: 700;
+  padding: 4px 10px;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.card-done-btn:hover {
+  background: var(--st-fechado);
+  color: #FFFFFF;
+  border-color: var(--st-fechado);
+}
+
 /* --- Modal / Sub-aba de Edição do Card e Backup --- */
 .modal-overlay {
   position: fixed;

@@ -10,6 +10,7 @@
       { id: "usuario", label: "Criação de usuário", color: "purple", builtIn: true },
       { id: "email", label: "E-mail", color: "amber", builtIn: true },
       { id: "falha", label: "Falha", color: "red", builtIn: true },
+      { id: "melhoria", label: "Melhoria", color: "green", builtIn: true },
       { id: "outro", label: "Outro", color: "slate", builtIn: true }
     ],
     task_priorities: [
@@ -120,7 +121,6 @@
 
   /* FORMATADORES DE DATA CONFIÁVEIS */
   function todayStr(){
-    // Cria string no formato YYYY-MM-DD usando data local
     var d = new Date();
     var y = d.getFullYear();
     var m = String(d.getMonth() + 1).padStart(2, '0');
@@ -352,7 +352,10 @@
     LocalStore.setObj('custom_options', state.customOptions);
 
     refreshAllSelects();
-    if(targetSelect) targetSelect.value = newId;
+    if(targetSelect){
+      targetSelect.value = newId;
+      if(meta.selectId === 'tk_category') syncValidationBadgeUI();
+    }
     closeOptionModal();
     renderAll();
     showToast('"' + newObj.label + '" cadastrado!');
@@ -418,6 +421,13 @@
       return (a.order || 0) - (b.order || 0);
     });
     return cols.length ? cols : DEFAULT_TASK_COLS;
+  }
+
+  function getDoneColumn(){
+    var cols = getSortedTaskCols();
+    return cols.find(function(c){ return !!c.isDone; })
+      || cols.find(function(c){ return c.id === 'done' || /conclu/i.test(c.title || ''); })
+      || cols[cols.length - 1];
   }
 
   function seedDefaultTaskCols(){
@@ -675,23 +685,20 @@
     showToast("Backup restaurado com sucesso!");
   }
 
-  /* --- RENDERIZAÇÃO DAS BOXES (RESUMO) CORRIGIDAS --- */
+  /* --- RENDERIZAÇÃO DAS BOXES (RESUMO) --- */
   function renderSummary(){
     var el = document.getElementById('summary');
     if(!el) return;
-    var today = todayStr(); // yyyy-mm-dd
+    var today = todayStr();
     var tasks = state.tasks || [];
     var tickets = state.tickets || [];
     
-    // Filtramos apenas as tarefas que NÃO estão em quadros de "Concluído"
     var pendingTasks = tasks.filter(function(t){ return !t.done; });
     
-    // Contagens de tempo
     var late = pendingTasks.filter(function(t){ return t.dueDate && t.dueDate < today; }).length;
     var dueToday = pendingTasks.filter(function(t){ return t.dueDate === today; }).length;
     var onTime = pendingTasks.filter(function(t){ return !t.dueDate || t.dueDate > today; }).length;
     
-    // Chamados e Implantações
     var openTickets = tickets.filter(function(t){ return t.status !== 'fechado'; }).length;
     var impls = state.implantacoes || [];
     var implPend = impls.filter(function(i){ return i.status !== 'concluida' && (i.demandas||[]).some(function(d){ return !d.concluida; }); }).length;
@@ -724,6 +731,9 @@
     var empStr = (t.empresa ? esc(t.empresa) : '') + (t.codigo ? ' (' + esc(t.codigo) + ')' : '');
     var validadoHtml = t.validado ? '<span class="tag validado-ok" title="'+(t.validadoEm ? 'Validado em '+fmtDate(t.validadoEm) : 'Validado')+'">✓ Validado p/ sistema</span>' : '';
     var completedHtml = (isDoneCol && t.completedAt) ? '<span class="tag opt-green">Concluído em ' + fmtDate(t.completedAt) + '</span>' : '';
+    var doneBtnHtml = !isDoneCol
+      ? '<button type="button" class="card-done-btn" data-act="completeTask" data-id="'+t.id+'" title="Concluir e mover para o quadro Concluído">✓ Concluído</button>'
+      : '';
 
     var logs = Array.isArray(t.updatesLog) ? t.updatesLog : [];
     var latest = logs.length ? logs[0] : null;
@@ -752,6 +762,7 @@
           '<span class="tag opt-'+esc(catColor)+'">'+esc(catOpt.label)+'</span>'+
           completedHtml+
         '</div>'+
+        doneBtnHtml+
       '</div>'+
       '<div class="actions"><button class="icon-btn" data-act="delTask" data-id="'+t.id+'" title="Remover">'+trashSvg()+'</button></div>'+
     '</div>';
@@ -775,15 +786,13 @@
     var firstTodoCol = cols.find(function(c){ return !c.isDone; }) || cols[0];
     var firstDoneCol = cols.find(function(c){ return !!c.isDone; }) || cols[cols.length - 1];
 
-    // ORDENAÇÃO: Data mais próxima primeiro. Empate: Prioridade Alta > Média > Baixa
     var sortedTasks = tasks.slice().sort(function(a, b){
-      var dateA = a.dueDate || '9999-12-31'; // Sem data vai pro final
+      var dateA = a.dueDate || '9999-12-31';
       var dateB = b.dueDate || '9999-12-31';
       
       if(dateA < dateB) return -1;
       if(dateA > dateB) return 1;
       
-      // Datas iguais, verificar prioridade
       var pWeight = { "alta": 3, "media": 2, "baixa": 1 };
       var pA = pWeight[a.priority] || 0;
       var pB = pWeight[b.priority] || 0;
@@ -793,7 +802,6 @@
       return 0;
     });
 
-    // Distribui nas colunas
     sortedTasks.forEach(function(t){
       var st = t.status;
       if(st && buckets[st]){
@@ -935,13 +943,33 @@
     renderTaskActivityFeed();
   }
 
+  function isFalhaOrMelhoriaCategory(categoryId){
+    if(!categoryId) return false;
+    var opt = findOption('task_categories', categoryId);
+    var text = ((opt && opt.label) ? opt.label : categoryId)
+      .toLowerCase()
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '');
+    return text.indexOf('falha') !== -1 || text.indexOf('melhoria') !== -1;
+  }
+
   function syncValidationBadgeUI(){
     var chk = document.getElementById('tk_validado');
+    var catSel = document.getElementById('tk_category');
     var box = document.getElementById('validationBox');
     var badge = document.getElementById('tk_valStatusBadge');
     var msg = document.getElementById('tk_validationMsg');
+    var valPorLabel = document.getElementById('tk_validadoPorLabel');
     if(!chk || !box || !badge) return;
     if(msg) msg.hidden = true;
+
+    var exigeValidador = catSel && isFalhaOrMelhoriaCategory(catSel.value);
+    if(valPorLabel){
+      valPorLabel.textContent = exigeValidador
+        ? 'Validado por *'
+        : 'Validado por (opcional)';
+    }
+
     if(chk.checked){
       box.classList.add('is-validated');
       badge.classList.add('ok');
@@ -1018,7 +1046,6 @@
       return;
     }
 
-    // Se o usuário digitou algo no compositor rápido e clicou direto em Salvar, inclui automaticamente
     var pendingOcc = document.getElementById('tk_newCommentStatus').value.trim();
     var pendingExp = document.getElementById('tk_newCommentNext').value.trim();
     if(pendingOcc || pendingExp){
@@ -1045,6 +1072,12 @@
     var validadoPor = document.getElementById('tk_validadoPor').value.trim() || null;
     var validacaoObs = document.getElementById('tk_validacaoObs').value.trim() || null;
 
+    if(validado && isFalhaOrMelhoriaCategory(category) && !validadoPor){
+      showTaskValidationError('Para cards de Falha ou Melhoria, informe a pessoa que validou no campo "Validado por".');
+      document.getElementById('tk_validadoPor').focus();
+      return;
+    }
+
     if(validado && !empresa && !notes){
       showTaskValidationError('Para validar para o sistema, preencha ao menos a Empresa ou a Descrição do card.');
       return;
@@ -1055,7 +1088,6 @@
     var isDoneCol = !!(targetCol && targetCol.isDone);
     var existing = editingTaskId ? (state.tasks||[]).find(function(x){ return x.id === editingTaskId; }) : null;
 
-    // Se mudou de quadro pelo seletor dentro do modal, registra também a transição automática
     var generatedEntry = null;
     if(existing && existing.status !== status && targetCol){
       var fromCol = cols.find(function(c){ return c.id === existing.status; });
@@ -1562,6 +1594,12 @@
         if(act === 'delTask'){
           e.stopPropagation();
           getStorage().collection('tasks_oneoff').doc(id).delete();
+        } else if(act === 'completeTask'){
+          e.stopPropagation();
+          var doneCol = getDoneColumn();
+          if(doneCol){
+            moveTaskToColumn(id, doneCol.id, false);
+          }
         } else if(act === 'configColAuto'){
           openColAutoModal(id);
         } else if(act === 'openInlineCard'){
@@ -1685,21 +1723,10 @@
       getStorage().collection('tickets').doc(el.dataset.id).update({ notes: el.value.trim() });
     }, true);
 
-    // --- Drag & Drop (Estilo Trello) com Geração Automática de Atualização ---
+    // --- Drag & Drop (Estilo Trello) com Reset Seguro ---
     var draggingTask = null;
 
-    document.addEventListener('dragstart', function(e){
-      var taskCard = e.target.closest('.task-card');
-      if(taskCard){
-        isDraggingCard = true;
-        draggingTask = taskCard;
-        setTimeout(function(){ taskCard.classList.add('dragging'); }, 0);
-        e.dataTransfer.effectAllowed = 'move';
-        e.dataTransfer.setData('text/plain', taskCard.dataset.id);
-      }
-    });
-
-    document.addEventListener('dragend', function(){
+    function resetDragState(){
       if(draggingTask){
         draggingTask.classList.remove('dragging');
         draggingTask = null;
@@ -1708,7 +1735,22 @@
         el.classList.remove('drag-over');
       });
       setTimeout(function(){ isDraggingCard = false; }, 50);
+    }
+
+    document.addEventListener('dragstart', function(e){
+      var taskCard = e.target.closest('.task-card');
+      if(taskCard){
+        isDraggingCard = true;
+        draggingTask = taskCard;
+        setTimeout(function(){
+          if(draggingTask) draggingTask.classList.add('dragging');
+        }, 0);
+        e.dataTransfer.effectAllowed = 'move';
+        e.dataTransfer.setData('text/plain', taskCard.dataset.id);
+      }
     });
+
+    document.addEventListener('dragend', resetDragState);
 
     var taskLanesContainer = document.getElementById('taskLanes');
     if(taskLanesContainer){
@@ -1754,9 +1796,12 @@
           laneBody.classList.remove('drag-over');
           var id = (draggingTask && draggingTask.dataset.id) || e.dataTransfer.getData('text/plain');
           var lane = laneBody.closest('.task-lane');
+          resetDragState();
           if(lane && id){
             moveTaskToColumn(id, lane.dataset.st, false);
           }
+        } else {
+          resetDragState();
         }
       });
     }
@@ -1784,6 +1829,9 @@
 
     var tkValidadoChk = document.getElementById('tk_validado');
     if(tkValidadoChk) tkValidadoChk.addEventListener('change', syncValidationBadgeUI);
+
+    var tkCategorySel = document.getElementById('tk_category');
+    if(tkCategorySel) tkCategorySel.addEventListener('change', syncValidationBadgeUI);
 
     var taskOverlay = document.getElementById('taskOverlay');
     if(taskOverlay) taskOverlay.addEventListener('click', function(e){
